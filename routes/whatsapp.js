@@ -658,4 +658,53 @@ router.put("/conversations/:conversationId/read", async (req, res) => {
   }
 });
 
+// PROXY PARA BAIXAR/EXIBIR MÍDIA DO WHATSAPP
+router.get("/media/:mediaId", async (req, res) => {
+  try {
+    const { mediaId } = req.params;
+
+    if (!mediaId) {
+      return res.status(400).json({
+        success: false,
+        error: "mediaId obrigatório",
+      });
+    }
+
+    const mediaInfoResponse = await axios.get(`${GRAPH_URL}/${mediaId}`, {
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+      },
+    });
+
+    const mediaUrl = mediaInfoResponse.data?.url;
+    const mimeType = mediaInfoResponse.data?.mime_type || "application/octet-stream";
+
+    if (!mediaUrl) {
+      return res.status(404).json({
+        success: false,
+        error: "URL da mídia não encontrada",
+      });
+    }
+
+    const mediaFileResponse = await axios.get(mediaUrl, {
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      responseType: "stream",
+    });
+
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Cache-Control", "private, max-age=300");
+
+    mediaFileResponse.data.pipe(res);
+  } catch (error) {
+    console.error("Erro ao buscar mídia:", error.response?.data || error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
 module.exports = router;
