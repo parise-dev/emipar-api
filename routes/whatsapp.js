@@ -772,4 +772,116 @@ router.get("/media/:mediaId", async (req, res) => {
   }
 });
 
+// ENVIAR IMAGEM
+router.post("/send-image", upload.single("image"), async (req, res) => {
+  try {
+    const { to, clientId, conversationId, caption } = req.body;
+
+    if (!to) {
+      return res.status(400).json({
+        success: false,
+        error: "Campo obrigatório: to",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: "Imagem não enviada",
+      });
+    }
+
+    let finalConversationId = conversationId || "";
+
+    if (!finalConversationId) {
+      const existingConversation = await db
+        .collection("whatsapp_conversas")
+        .where("phone", "==", to)
+        .limit(1)
+        .get();
+
+      if (!existingConversation.empty) {
+        finalConversationId = existingConversation.docs[0].id;
+      }
+    }
+
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", req.file.mimetype || "image/jpeg");
+    form.append("file", req.file.buffer, {
+      filename: req.file.originalname || "imagem.jpg",
+      contentType: req.file.mimetype || "image/jpeg",
+    });
+
+    const mediaResponse = await axios.post(
+      `${GRAPH_URL}/${PHONE_NUMBER_ID}/media`,
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+          ...form.getHeaders(),
+        },
+      }
+    );
+
+    const mediaId = mediaResponse.data.id;
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to,
+      type: "image",
+      image: {
+        id: mediaId,
+        caption: caption || "",
+      },
+    };
+
+    const sendResponse = await axios.post(
+      `${GRAPH_URL}/${PHONE_NUMBER_ID}/messages`,
+      payload,
+      { headers: graphHeaders() }
+    );
+
+    await db.collection("whatsapp_conversas").doc(finalConversationId).set(
+      {
+        clientId: clientId || "",
+        phone: to,
+        lastMessage: caption || "🖼️ Imagem",
+        lastTime: nowISO(),
+        updatedAt: nowISO(),
+      },
+      { merge: true }
+    );
+
+    await saveMessage({
+      conversationId: finalConversationId,
+      direction: "out",
+      to,
+      clientId: clientId || "",
+      type: "image",
+      text: caption || "",
+      mediaId,
+      mimeType: req.file.mimetype || "image/jpeg",
+      fileName: req.file.originalname || "",
+      status: "sent",
+      waMessageId: sendResponse.data?.messages?.[0]?.id || "",
+      waResponse: sendResponse.data,
+    });
+
+    return res.json({
+      success: true,
+      conversationId: finalConversationId,
+      mediaId,
+      data: sendResponse.data,
+    });
+  } catch (error) {
+    console.error("Erro send-image:", error.response?.data || error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
 module.exports = router;
