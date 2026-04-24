@@ -371,20 +371,59 @@ if (!to) {
 });
 
 // ENVIAR ÁUDIO
+// ENVIAR ÁUDIO / VOICE NOTE
 router.post("/send-audio", upload.single("audio"), async (req, res) => {
   try {
-    const { to, clientId } = req.body;
+    const { to, clientId, conversationId } = req.body;
+
+    if (!to) {
+      return res.status(400).json({
+        success: false,
+        error: "Campo obrigatório: to",
+      });
+    }
 
     if (!req.file) {
-      return res.status(400).json({ success: false, error: "Áudio não enviado" });
+      return res.status(400).json({
+        success: false,
+        error: "Áudio não enviado",
+      });
+    }
+
+    let finalConversationId = conversationId || "";
+
+    if (!finalConversationId) {
+      const existingConversation = await db
+        .collection("whatsapp_conversas")
+        .where("phone", "==", to)
+        .limit(1)
+        .get();
+
+      if (!existingConversation.empty) {
+        finalConversationId = existingConversation.docs[0].id;
+      } else {
+        const newConversationRef = await db.collection("whatsapp_conversas").add({
+          clientId: clientId || "",
+          name: to,
+          phone: to,
+          pipelineStatus: "aguardando_envio",
+          lastMessage: "",
+          lastTime: "",
+          unread: 0,
+          createdAt: nowISO(),
+          updatedAt: nowISO(),
+        });
+
+        finalConversationId = newConversationRef.id;
+      }
     }
 
     const form = new FormData();
     form.append("messaging_product", "whatsapp");
-    form.append("type", req.file.mimetype || "audio/webm");
+    form.append("type", req.file.mimetype || "audio/ogg");
     form.append("file", req.file.buffer, {
-      filename: req.file.originalname || "audio.webm",
-      contentType: req.file.mimetype || "audio/webm",
+      filename: req.file.originalname || "audio.ogg",
+      contentType: req.file.mimetype || "audio/ogg",
     });
 
     const mediaResponse = await axios.post(
@@ -400,12 +439,17 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
 
     const mediaId = mediaResponse.data.id;
 
+    const isVoiceNote =
+      (req.file.originalname || "").endsWith(".ogg") ||
+      (req.file.mimetype || "").includes("ogg");
+
     const payload = {
       messaging_product: "whatsapp",
       to,
       type: "audio",
       audio: {
         id: mediaId,
+        voice: isVoiceNote,
       },
     };
 
@@ -415,19 +459,40 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
       { headers: graphHeaders() }
     );
 
+    await db.collection("whatsapp_conversas").doc(finalConversationId).set(
+      {
+        clientId: clientId || "",
+        phone: to,
+        lastMessage: "🎤 Áudio",
+        lastTime: nowISO(),
+        updatedAt: nowISO(),
+      },
+      { merge: true }
+    );
+
     await saveMessage({
+      conversationId: finalConversationId,
       direction: "out",
       to,
       clientId: clientId || "",
       type: "audio",
+      text: "🎤 Áudio",
       mediaId,
+      mimeType: req.file.mimetype || "audio/ogg",
       status: "sent",
+      waMessageId: sendResponse.data?.messages?.[0]?.id || "",
       waResponse: sendResponse.data,
     });
 
-    return res.json({ success: true, mediaId, data: sendResponse.data });
+    return res.json({
+      success: true,
+      conversationId: finalConversationId,
+      mediaId,
+      data: sendResponse.data,
+    });
   } catch (error) {
-    console.error(error.response?.data || error.message);
+    console.error("Erro send-audio:", error.response?.data || error.message);
+
     return res.status(500).json({
       success: false,
       error: error.response?.data || error.message,
