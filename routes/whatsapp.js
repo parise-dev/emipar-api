@@ -146,20 +146,20 @@ router.post("/webhook", async (req, res) => {
           });
 
           const sentMessages = await db
-            .collection("whatsapp_mensagens")
-            .where("waResponse.messages.0.id", "==", status.id)
-            .limit(1)
-            .get();
+  .collection("whatsapp_mensagens")
+  .where("waMessageId", "==", status.id)
+  .limit(1)
+  .get();
 
-          if (!sentMessages.empty) {
-            await sentMessages.docs[0].ref.set(
-              {
-                status: status.status,
-                statusUpdatedAt: nowISO(),
-              },
-              { merge: true }
-            );
-          }
+         if (!sentMessages.empty) {
+  await sentMessages.docs[0].ref.set(
+    {
+      status: status.status,
+      statusUpdatedAt: nowISO(),
+    },
+    { merge: true }
+  );
+}
         }
       }
     }
@@ -238,16 +238,17 @@ router.post("/send-text", async (req, res) => {
       { merge: true }
     );
 
-    await saveMessage({
-      conversationId: finalConversationId,
-      direction: "out",
-      to,
-      clientId: clientId || "",
-      type: "text",
-      text: message,
-      status: "sent",
-      waResponse: response.data,
-    });
+   await saveMessage({
+  conversationId: finalConversationId,
+  direction: "out",
+  to,
+  clientId: clientId || "",
+  type: "text",
+  text: message,
+  status: "sent",
+  waMessageId: response.data?.messages?.[0]?.id || "",
+  waResponse: response.data,
+});
 
     return res.json({
       success: true,
