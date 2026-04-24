@@ -582,4 +582,28 @@ router.put("/conversations/:conversationId/status", async (req, res) => {
   }
 });
 
+// MARCAR CONVERSA COMO LIDA
+router.put("/conversations/:conversationId/read", async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+
+    await db.collection("whatsapp_conversas").doc(conversationId).set(
+      {
+        unread: 0,
+        readAt: nowISO(),
+        updatedAt: nowISO(),
+      },
+      { merge: true }
+    );
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Erro ao marcar conversa como lida:", error);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 module.exports = router;
