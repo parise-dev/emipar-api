@@ -15,6 +15,9 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(bodyParser.json());
 
+const whatsappRoutes = require("./routes/whatsapp");
+app.use("/whatsapp", whatsappRoutes);
+
 // --- Função JWT ---
 const generateToken = (email) =>
   jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "1h" });
