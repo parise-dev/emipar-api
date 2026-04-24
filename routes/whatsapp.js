@@ -32,6 +32,17 @@ async function saveMessage(data) {
   });
 }
 
+async function getWhatsappMediaUrl(mediaId) {
+  const response = await axios.get(`${GRAPH_URL}/${mediaId}`, {
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+    },
+  });
+
+  return response.data?.url || "";
+}
+
+
 // WEBHOOK VERIFY
 router.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -67,21 +78,58 @@ router.post("/webhook", async (req, res) => {
           const contactName = contact?.profile?.name || from;
 
           let text = "";
+let mediaId = "";
+let mediaUrl = "";
+let mimeType = "";
+let fileName = "";
 
-          if (msg.type === "text") {
-            text = msg.text?.body || "";
-          }
+if (msg.type === "text") {
+  text = msg.text?.body || "";
+}
 
-          if (msg.type === "button") {
-            text = msg.button?.text || "";
-          }
+if (msg.type === "button") {
+  text = msg.button?.text || "";
+}
 
-          if (msg.type === "interactive") {
-            text =
-              msg.interactive?.button_reply?.title ||
-              msg.interactive?.list_reply?.title ||
-              "";
-          }
+if (msg.type === "interactive") {
+  text =
+    msg.interactive?.button_reply?.title ||
+    msg.interactive?.list_reply?.title ||
+    "";
+}
+
+if (msg.type === "audio") {
+  mediaId = msg.audio?.id || "";
+  mimeType = msg.audio?.mime_type || "";
+  text = "🎤 Áudio recebido";
+}
+
+if (msg.type === "image") {
+  mediaId = msg.image?.id || "";
+  mimeType = msg.image?.mime_type || "";
+  text = msg.image?.caption || "🖼️ Imagem recebida";
+}
+
+if (msg.type === "document") {
+  mediaId = msg.document?.id || "";
+  mimeType = msg.document?.mime_type || "";
+  fileName = msg.document?.filename || "";
+  text = msg.document?.caption || `📄 Documento recebido${fileName ? `: ${fileName}` : ""}`;
+}
+
+if (msg.type === "video") {
+  mediaId = msg.video?.id || "";
+  mimeType = msg.video?.mime_type || "";
+  text = msg.video?.caption || "🎥 Vídeo recebido";
+}
+
+if (mediaId) {
+  try {
+    mediaUrl = await getWhatsappMediaUrl(mediaId);
+  } catch (mediaError) {
+    console.error("Erro ao buscar URL da mídia:", mediaError.response?.data || mediaError.message);
+  }
+}
 
           const existingConversation = await db
             .collection("whatsapp_conversas")
@@ -124,15 +172,19 @@ router.post("/webhook", async (req, res) => {
           }
 
           await saveMessage({
-            conversationId,
-            direction: "in",
-            waMessageId: msg.id,
-            from,
-            contactName,
-            type: msg.type,
-            text,
-            raw: msg,
-          });
+  conversationId,
+  direction: "in",
+  waMessageId: msg.id,
+  from,
+  contactName,
+  type: msg.type,
+  text,
+  mediaId,
+  mediaUrl,
+  mimeType,
+  fileName,
+  raw: msg,
+});
         }
 
         for (const status of statuses) {
