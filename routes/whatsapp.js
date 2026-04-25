@@ -368,18 +368,46 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
   {
     type: "header",
     parameters: [
-      { type: "text", text: nome },
+      {
+        type: "text",
+        parameter_name: "nome",
+        text: nome,
+      },
     ],
   },
   {
     type: "body",
     parameters: [
-      { type: "text", text: nome_rep },
-      { type: "text", text: emprs },
-      { type: "text", text: qtd },
-      { type: "text", text: rua },
-      { type: "text", text: cidade },
-      { type: "text", text: n },
+      {
+        type: "text",
+        parameter_name: "nome_rep",
+        text: nome_rep,
+      },
+      {
+        type: "text",
+        parameter_name: "emprs",
+        text: emprs,
+      },
+      {
+        type: "text",
+        parameter_name: "qtd",
+        text: qtd,
+      },
+      {
+        type: "text",
+        parameter_name: "rua",
+        text: rua,
+      },
+      {
+        type: "text",
+        parameter_name: "cidade",
+        text: cidade,
+      },
+      {
+        type: "text",
+        parameter_name: "n",
+        text: n,
+      },
     ],
   },
 ],
