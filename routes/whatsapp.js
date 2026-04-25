@@ -318,6 +318,7 @@ router.post("/send-text", async (req, res) => {
 });
 
 // ENVIAR TEMPLATE CONFIRMAR PEDIDO
+// ENVIAR TEMPLATE CONFIRMAR PEDIDO
 router.post("/send-template/confirmar-pedido", async (req, res) => {
   try {
     const {
@@ -352,6 +353,23 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
 
       if (!existingConversation.empty) {
         finalConversationId = existingConversation.docs[0].id;
+      } else {
+        const newConversationRef = await db.collection("whatsapp_conversas").add({
+          clientId: clientId || "",
+          name: nome || to,
+          phone: to,
+          product: qtd || "",
+          amount: "",
+          address: `${rua}, ${cidade}, n° ${n}`,
+          pipelineStatus: "aguardando_envio",
+          lastMessage: "",
+          lastTime: "",
+          unread: 0,
+          createdAt: nowISO(),
+          updatedAt: nowISO(),
+        });
+
+        finalConversationId = newConversationRef.id;
       }
     }
 
@@ -365,52 +383,52 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
           code: "pt_BR",
         },
         components: [
-  {
-    type: "header",
-    parameters: [
-      {
-        type: "text",
-        parameter_name: "nome",
-        text: nome,
-      },
-    ],
-  },
-  {
-    type: "body",
-    parameters: [
-      {
-        type: "text",
-        parameter_name: "nome_rep",
-        text: nome_rep,
-      },
-      {
-        type: "text",
-        parameter_name: "emprs",
-        text: emprs,
-      },
-      {
-        type: "text",
-        parameter_name: "qtd",
-        text: qtd,
-      },
-      {
-        type: "text",
-        parameter_name: "rua",
-        text: rua,
-      },
-      {
-        type: "text",
-        parameter_name: "cidade",
-        text: cidade,
-      },
-      {
-        type: "text",
-        parameter_name: "n",
-        text: n,
-      },
-    ],
-  },
-],
+          {
+            type: "header",
+            parameters: [
+              {
+                type: "text",
+                parameter_name: "nome",
+                text: nome,
+              },
+            ],
+          },
+          {
+            type: "body",
+            parameters: [
+              {
+                type: "text",
+                parameter_name: "nome_rep",
+                text: nome_rep,
+              },
+              {
+                type: "text",
+                parameter_name: "emprs",
+                text: emprs,
+              },
+              {
+                type: "text",
+                parameter_name: "qtd",
+                text: qtd,
+              },
+              {
+                type: "text",
+                parameter_name: "rua",
+                text: rua,
+              },
+              {
+                type: "text",
+                parameter_name: "cidade",
+                text: cidade,
+              },
+              {
+                type: "text",
+                parameter_name: "n",
+                text: n,
+              },
+            ],
+          },
+        ],
       },
     };
 
@@ -420,20 +438,25 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
       { headers: graphHeaders() }
     );
 
-    const textPreview = `Olá, ${nome}!\n\nAqui é o ${nome_rep}, da equipe da ${emprs}. Recebemos seu pedido de ${qtd} e ele será entregue no endereço abaixo:\n\n📍 Rua: ${rua}, ${cidade}, n° ${n}\n\nVocê confirma o endereço?`;
+    const textPreview =
+      `Olá, ${nome}!\n\n` +
+      `Aqui é o ${nome_rep}, da equipe da ${emprs}. Recebemos seu pedido de ${qtd} e ele será entregue no endereço abaixo:\n\n` +
+      `📍 Rua: ${rua}, ${cidade}, n° ${n}\n\n` +
+      `Você confirma o endereço?`;
 
-    if (finalConversationId) {
-      await db.collection("whatsapp_conversas").doc(finalConversationId).set(
-        {
-          clientId: clientId || "",
-          phone: to,
-          lastMessage: "Template: confirmar pedido",
-          lastTime: nowISO(),
-          updatedAt: nowISO(),
-        },
-        { merge: true }
-      );
-    }
+    await db.collection("whatsapp_conversas").doc(finalConversationId).set(
+      {
+        clientId: clientId || "",
+        name: nome || to,
+        phone: to,
+        product: qtd || "",
+        address: `${rua}, ${cidade}, n° ${n}`,
+        lastMessage: "Template: confirmar endereço",
+        lastTime: nowISO(),
+        updatedAt: nowISO(),
+      },
+      { merge: true }
+    );
 
     await saveMessage({
       conversationId: finalConversationId,
