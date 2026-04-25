@@ -317,30 +317,69 @@ router.post("/send-text", async (req, res) => {
   }
 });
 
-// ENVIAR TEMPLATE CONFIRMAÇÃO ENDEREÇO
 // ENVIAR TEMPLATE CONFIRMAR PEDIDO
 router.post("/send-template/confirmar-pedido", async (req, res) => {
   try {
-    const { to, clientId } = req.body;
+    const {
+      to,
+      clientId,
+      conversationId,
+      nome,
+      nome_rep,
+      emprs,
+      qtd,
+      rua,
+      cidade,
+      n,
+    } = req.body;
 
-if (!to) {
-  return res.status(400).json({
-    success: false,
-    error: "Campo obrigatório: to",
-  });
-}
+    if (!to || !nome || !nome_rep || !emprs || !qtd || !rua || !cidade || !n) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Campos obrigatórios: to, nome, nome_rep, emprs, qtd, rua, cidade, n",
+      });
+    }
+
+    let finalConversationId = conversationId || "";
+
+    if (!finalConversationId) {
+      const existingConversation = await db
+        .collection("whatsapp_conversas")
+        .where("phone", "==", to)
+        .limit(1)
+        .get();
+
+      if (!existingConversation.empty) {
+        finalConversationId = existingConversation.docs[0].id;
+      }
+    }
 
     const payload = {
-  messaging_product: "whatsapp",
-  to,
-  type: "template",
-  template: {
-    name: "confirmar_pedido",
-    language: {
-      code: "pt_BR",
-    },
-  },
-};
+      messaging_product: "whatsapp",
+      to,
+      type: "template",
+      template: {
+        name: "confirmar_pedido",
+        language: {
+          code: "pt_BR",
+        },
+        components: [
+          {
+            type: "body",
+            parameters: [
+              { type: "text", text: nome },
+              { type: "text", text: nome_rep },
+              { type: "text", text: emprs },
+              { type: "text", text: qtd },
+              { type: "text", text: rua },
+              { type: "text", text: cidade },
+              { type: "text", text: n },
+            ],
+          },
+        ],
+      },
+    };
 
     const response = await axios.post(
       `${GRAPH_URL}/${PHONE_NUMBER_ID}/messages`,
@@ -348,20 +387,41 @@ if (!to) {
       { headers: graphHeaders() }
     );
 
+    const textPreview = `Olá, ${nome}!\n\nAqui é o ${nome_rep}, da equipe da ${emprs}. Recebemos seu pedido de ${qtd} e ele será entregue no endereço abaixo:\n\n📍 Rua: ${rua}, ${cidade}, n° ${n}\n\nVocê confirma o endereço?`;
+
+    if (finalConversationId) {
+      await db.collection("whatsapp_conversas").doc(finalConversationId).set(
+        {
+          clientId: clientId || "",
+          phone: to,
+          lastMessage: "Template: confirmar pedido",
+          lastTime: nowISO(),
+          updatedAt: nowISO(),
+        },
+        { merge: true }
+      );
+    }
+
     await saveMessage({
+      conversationId: finalConversationId,
       direction: "out",
       to,
       clientId: clientId || "",
       type: "template",
       templateName: "confirmar_pedido",
-      text: `Template confirmar_pedido enviado para`,
+      text: textPreview,
       status: "sent",
+      waMessageId: response.data?.messages?.[0]?.id || "",
       waResponse: response.data,
     });
 
-    return res.json({ success: true, data: response.data });
+    return res.json({
+      success: true,
+      conversationId: finalConversationId,
+      data: response.data,
+    });
   } catch (error) {
-    console.error("Erro ao enviar template:", error.response?.data || error.message);
+    console.error("Erro confirmar_pedido:", error.response?.data || error.message);
 
     return res.status(500).json({
       success: false,
