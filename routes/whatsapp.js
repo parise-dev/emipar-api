@@ -884,4 +884,117 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
   }
 });
 
+// ENVIAR DOCUMENTO
+router.post("/send-document", upload.single("document"), async (req, res) => {
+  try {
+    const { to, clientId, conversationId, caption } = req.body;
+
+    if (!to) {
+      return res.status(400).json({
+        success: false,
+        error: "Campo obrigatório: to",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: "Documento não enviado",
+      });
+    }
+
+    let finalConversationId = conversationId || "";
+
+    if (!finalConversationId) {
+      const existingConversation = await db
+        .collection("whatsapp_conversas")
+        .where("phone", "==", to)
+        .limit(1)
+        .get();
+
+      if (!existingConversation.empty) {
+        finalConversationId = existingConversation.docs[0].id;
+      }
+    }
+
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", req.file.mimetype || "application/pdf");
+    form.append("file", req.file.buffer, {
+      filename: req.file.originalname || "documento.pdf",
+      contentType: req.file.mimetype || "application/pdf",
+    });
+
+    const mediaResponse = await axios.post(
+      `${GRAPH_URL}/${PHONE_NUMBER_ID}/media`,
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+          ...form.getHeaders(),
+        },
+      }
+    );
+
+    const mediaId = mediaResponse.data.id;
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to,
+      type: "document",
+      document: {
+        id: mediaId,
+        filename: req.file.originalname || "documento.pdf",
+        caption: caption || "",
+      },
+    };
+
+    const sendResponse = await axios.post(
+      `${GRAPH_URL}/${PHONE_NUMBER_ID}/messages`,
+      payload,
+      { headers: graphHeaders() }
+    );
+
+    await db.collection("whatsapp_conversas").doc(finalConversationId).set(
+      {
+        clientId: clientId || "",
+        phone: to,
+        lastMessage: `📄 ${req.file.originalname || "Documento"}`,
+        lastTime: nowISO(),
+        updatedAt: nowISO(),
+      },
+      { merge: true }
+    );
+
+    await saveMessage({
+      conversationId: finalConversationId,
+      direction: "out",
+      to,
+      clientId: clientId || "",
+      type: "document",
+      text: caption || `📄 ${req.file.originalname || "Documento"}`,
+      mediaId,
+      mimeType: req.file.mimetype || "application/pdf",
+      fileName: req.file.originalname || "",
+      status: "sent",
+      waMessageId: sendResponse.data?.messages?.[0]?.id || "",
+      waResponse: sendResponse.data,
+    });
+
+    return res.json({
+      success: true,
+      conversationId: finalConversationId,
+      mediaId,
+      data: sendResponse.data,
+    });
+  } catch (error) {
+    console.error("Erro send-document:", error.response?.data || error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
 module.exports = router;
