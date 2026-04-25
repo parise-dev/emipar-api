@@ -1113,4 +1113,61 @@ router.post("/send-document", upload.single("document"), async (req, res) => {
   }
 });
 
+// VERIFICAR SE JÁ EXISTE CONVERSA
+router.get("/conversations/find", async (req, res) => {
+  try {
+    const { phone, clientId } = req.query;
+
+    if (!phone && !clientId) {
+      return res.status(400).json({
+        success: false,
+        error: "Informe phone ou clientId",
+      });
+    }
+
+    let snapshot = null;
+
+    if (clientId) {
+      snapshot = await db
+        .collection("whatsapp_conversas")
+        .where("clientId", "==", String(clientId))
+        .limit(1)
+        .get();
+    }
+
+    if ((!snapshot || snapshot.empty) && phone) {
+      snapshot = await db
+        .collection("whatsapp_conversas")
+        .where("phone", "==", String(phone))
+        .limit(1)
+        .get();
+    }
+
+    if (!snapshot || snapshot.empty) {
+      return res.json({
+        success: true,
+        exists: false,
+        data: null,
+      });
+    }
+
+    const doc = snapshot.docs[0];
+
+    return res.json({
+      success: true,
+      exists: true,
+      data: {
+        id: doc.id,
+        ...doc.data(),
+      },
+    });
+  } catch (error) {
+    console.error("Erro ao buscar conversa:", error);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 module.exports = router;
