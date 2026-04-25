@@ -365,19 +365,24 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
           code: "pt_BR",
         },
         components: [
-          {
-            type: "body",
-            parameters: [
-              { type: "text", text: nome },
-              { type: "text", text: nome_rep },
-              { type: "text", text: emprs },
-              { type: "text", text: qtd },
-              { type: "text", text: rua },
-              { type: "text", text: cidade },
-              { type: "text", text: n },
-            ],
-          },
-        ],
+  {
+    type: "header",
+    parameters: [
+      { type: "text", text: nome },
+    ],
+  },
+  {
+    type: "body",
+    parameters: [
+      { type: "text", text: nome_rep },
+      { type: "text", text: emprs },
+      { type: "text", text: qtd },
+      { type: "text", text: rua },
+      { type: "text", text: cidade },
+      { type: "text", text: n },
+    ],
+  },
+],
       },
     };
 
