@@ -271,39 +271,54 @@ async function findClienteExistente({ phone, cpf, excludeId = null }) {
       cliente: null,
       phoneNorm: "",
       cpfNorm: "",
+      isCaloteiro: false,
+      caloteMotivo: "",
     };
   }
 
   const snap = await db.collection("clientes").get();
 
-  const existente = snap.docs.find((doc) => {
-    if (excludeId && doc.id === excludeId) return false;
+  const matches = snap.docs
+    .filter((doc) => {
+      if (excludeId && doc.id === excludeId) return false;
 
-    const c = doc.data();
+      const c = doc.data();
 
-    const phoneCliente = normalizePhoneBR(c.phone || "");
-    const cpfCliente = normalizeCpfCnpj(c.cpf || "");
+      const phoneCliente = normalizePhoneBR(c.phone || "");
+      const cpfCliente = normalizeCpfCnpj(c.cpf || "");
+
+      return (
+        (phoneNorm && phoneNorm === phoneCliente) ||
+        (cpfNorm && cpfNorm === cpfCliente)
+      );
+    })
+    .map((doc) => ({ id: doc.id, ...doc.data() }));
+
+  const existente = matches[0] || null;
+
+  const calote = matches.find((c) => {
+    const pagamento = normalizePagamento(c.status_pagamento);
+    const extraviado = normalizeExtraviadoSubstatus(c.status_extraviado);
+    const envio = normalizeString(c.status_envio);
 
     return (
-      (phoneNorm && phoneNorm === phoneCliente) ||
-      (cpfNorm && cpfNorm === cpfCliente)
+      pagamento === "Não Pago" ||
+      pagamento === "Extravio" ||
+      envio === "Extravio" ||
+      envio === "Devolucao" ||
+      extraviado === "Não Pago"
     );
   });
 
-  if (existente) {
-    return {
-      exists: true,
-      cliente: { id: existente.id, ...existente.data() },
-      phoneNorm,
-      cpfNorm,
-    };
-  }
-
   return {
-    exists: false,
-    cliente: null,
+    exists: !!existente,
+    cliente: existente,
     phoneNorm,
     cpfNorm,
+    isCaloteiro: !!calote,
+    caloteMotivo: calote
+      ? `${calote.status_pagamento || ""} ${calote.status_envio || ""} ${calote.status_extraviado || ""}`.trim()
+      : "",
   };
 }
 
@@ -806,6 +821,8 @@ app.post("/clientes", async (req, res) => {
         id: ref.id,
         ja_e_cliente: checkCliente.exists,
         cliente_existente_id: checkCliente.cliente?.id || null,
+        sinalizacao_cliente: checkCliente.isCaloteiro ? "calote" : "",
+calote_motivo: checkCliente.caloteMotivo || "",
         data: clienteTypebot,
       });
     }
@@ -889,6 +906,9 @@ app.post("/clientes", async (req, res) => {
       rastreiozap_gerado_em: "",
       rastreiozap_order_id: "",
       email: data.email || "",
+      cliente_existente_id: checkCliente.cliente?.id || "",
+      sinalizacao_cliente: checkCliente.isCaloteiro ? "calote" : "",
+calote_motivo: checkCliente.caloteMotivo || "",
     };
 
     const ref = await db.collection("clientes").add(clienteCheckout);
@@ -1522,6 +1542,41 @@ app.get("/financeiro", async (_, res) => {
     res.status(200).json(registros);
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete("/financeiro/limpar", async (req, res) => {
+  try {
+    const { confirm } = req.query;
+
+    if (confirm !== "ZERAR_FINANCEIRO") {
+      return res.status(400).json({
+        error: "Confirmação inválida. Use ?confirm=ZERAR_FINANCEIRO",
+      });
+    }
+
+    const snap = await db.collection("financeiro").get();
+
+    const batchSize = 400;
+    let deleted = 0;
+
+    for (let i = 0; i < snap.docs.length; i += batchSize) {
+      const batch = db.batch();
+      const docs = snap.docs.slice(i, i + batchSize);
+
+      docs.forEach((doc) => batch.delete(doc.ref));
+
+      await batch.commit();
+      deleted += docs.length;
+    }
+
+    return res.json({
+      success: true,
+      deleted,
+      message: "Financeiro zerado com sucesso. Clientes não foram alterados.",
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
   }
 });
 

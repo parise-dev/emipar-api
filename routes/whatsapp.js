@@ -274,6 +274,26 @@ if (pendingSnap.exists) {
       waResponse: pending.waResponse,
     });
 
+    if (pending.clientId) {
+  const clienteRef = db.collection("clientes").doc(pending.clientId);
+  const clienteSnap = await clienteRef.get();
+
+  if (clienteSnap.exists) {
+    const cliente = clienteSnap.data();
+    const statusPedido = cliente.status_pedido;
+
+    if (statusPedido === "Novo" || statusPedido === "Aberto") {
+      await clienteRef.set(
+        {
+          status_pedido: "Andamento",
+          updatedAt: nowISO(),
+        },
+        { merge: true }
+      );
+    }
+  }
+}
+
     await db.collection("whatsapp_conversas").doc(conversationId).set(
       {
         lastMessage: "Template: confirmar endereço",
