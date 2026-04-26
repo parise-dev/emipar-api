@@ -344,34 +344,21 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
 
     let finalConversationId = conversationId || "";
 
-    if (!finalConversationId) {
-      const existingConversation = await db
-        .collection("whatsapp_conversas")
-        .where("phone", "==", to)
-        .limit(1)
-        .get();
+    let existingConversationDoc = null;
 
-      if (!existingConversation.empty) {
-        finalConversationId = existingConversation.docs[0].id;
-      } else {
-        const newConversationRef = await db.collection("whatsapp_conversas").add({
-          clientId: clientId || "",
-          name: nome || to,
-          phone: to,
-          product: qtd || "",
-          amount: "",
-          address: `${rua}, ${cidade}, n° ${n}`,
-          pipelineStatus: "aguardando_envio",
-          lastMessage: "",
-          lastTime: "",
-          unread: 0,
-          createdAt: nowISO(),
-          updatedAt: nowISO(),
-        });
+if (!finalConversationId) {
+  const existingConversation = await db
+    .collection("whatsapp_conversas")
+    .where("phone", "==", to)
+    .limit(1)
+    .get();
 
-        finalConversationId = newConversationRef.id;
-      }
-    }
+  if (!existingConversation.empty) {
+    existingConversationDoc = existingConversation.docs[0];
+    finalConversationId = existingConversationDoc.id;
+  }
+}
+      
 
     const payload = {
       messaging_product: "whatsapp",
@@ -443,6 +430,25 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
       `Aqui é o ${nome_rep}, da equipe da ${emprs}. Recebemos seu pedido de ${qtd} e ele será entregue no endereço abaixo:\n\n` +
       `📍 Rua: ${rua}, ${cidade}, n° ${n}\n\n` +
       `Você confirma o endereço?`;
+
+      if (!finalConversationId) {
+  const newConversationRef = await db.collection("whatsapp_conversas").add({
+    clientId: clientId || "",
+    name: nome || to,
+    phone: to,
+    product: qtd || "",
+    amount: "",
+    address: `${rua}, ${cidade}, n° ${n}`,
+    pipelineStatus: "aguardando_envio",
+    lastMessage: "",
+    lastTime: "",
+    unread: 0,
+    createdAt: nowISO(),
+    updatedAt: nowISO(),
+  });
+
+  finalConversationId = newConversationRef.id;
+}
 
     await db.collection("whatsapp_conversas").doc(finalConversationId).set(
       {
