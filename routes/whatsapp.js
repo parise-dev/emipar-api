@@ -212,6 +212,81 @@ if (mediaId) {
     { merge: true }
   );
 }
+
+const pendingRef = db.collection("whatsapp_template_pendentes").doc(status.id);
+const pendingSnap = await pendingRef.get();
+
+if (pendingSnap.exists) {
+  const pending = pendingSnap.data();
+
+  if (status.status === "failed") {
+    await pendingRef.set(
+      {
+        status: "failed",
+        failedAt: nowISO(),
+        rawStatus: status,
+        updatedAt: nowISO(),
+      },
+      { merge: true }
+    );
+  }
+
+  if (["sent", "delivered", "read"].includes(status.status)) {
+    const existingConversation = await db
+      .collection("whatsapp_conversas")
+      .where("phone", "==", pending.to)
+      .limit(1)
+      .get();
+
+    let conversationId = "";
+
+    if (!existingConversation.empty) {
+      conversationId = existingConversation.docs[0].id;
+    } else {
+      const newConversationRef = await db.collection("whatsapp_conversas").add({
+        clientId: pending.clientId || "",
+        name: pending.nome || pending.to,
+        phone: pending.to,
+        product: pending.qtd || "",
+        amount: "",
+        address: `${pending.rua}, ${pending.cidade}, n° ${pending.n}`,
+        pipelineStatus: "aguardando_envio",
+        lastMessage: "Template: confirmar endereço",
+        lastTime: nowISO(),
+        unread: 0,
+        createdAt: nowISO(),
+        updatedAt: nowISO(),
+      });
+
+      conversationId = newConversationRef.id;
+    }
+
+    await saveMessage({
+      conversationId,
+      direction: "out",
+      to: pending.to,
+      clientId: pending.clientId || "",
+      type: "template",
+      templateName: pending.templateName || "confirmar_pedido",
+      text: pending.textPreview,
+      status: status.status,
+      waMessageId: pending.waMessageId,
+      waResponse: pending.waResponse,
+    });
+
+    await db.collection("whatsapp_conversas").doc(conversationId).set(
+      {
+        lastMessage: "Template: confirmar endereço",
+        lastTime: nowISO(),
+        updatedAt: nowISO(),
+      },
+      { merge: true }
+    );
+
+    await pendingRef.delete();
+  }
+}
+
         }
       }
     }
@@ -223,6 +298,7 @@ if (mediaId) {
   }
 });
 
+// ENVIAR TEXTO
 // ENVIAR TEXTO
 // ENVIAR TEXTO
 router.post("/send-text", async (req, res) => {
@@ -247,20 +323,6 @@ router.post("/send-text", async (req, res) => {
 
       if (!existingConversation.empty) {
         finalConversationId = existingConversation.docs[0].id;
-      } else {
-        const newConversationRef = await db.collection("whatsapp_conversas").add({
-          clientId: clientId || "",
-          name: to,
-          phone: to,
-          pipelineStatus: "aguardando_envio",
-          lastMessage: "",
-          lastTime: "",
-          unread: 0,
-          createdAt: nowISO(),
-          updatedAt: nowISO(),
-        });
-
-        finalConversationId = newConversationRef.id;
       }
     }
 
@@ -279,6 +341,17 @@ router.post("/send-text", async (req, res) => {
       { headers: graphHeaders() }
     );
 
+    const waMessageId = response.data?.messages?.[0]?.id || "";
+
+    if (!finalConversationId) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Conversa não encontrada. Para iniciar conversa com cliente novo, envie um template primeiro.",
+        data: response.data,
+      });
+    }
+
     await db.collection("whatsapp_conversas").doc(finalConversationId).set(
       {
         clientId: clientId || "",
@@ -290,17 +363,17 @@ router.post("/send-text", async (req, res) => {
       { merge: true }
     );
 
-   await saveMessage({
-  conversationId: finalConversationId,
-  direction: "out",
-  to,
-  clientId: clientId || "",
-  type: "text",
-  text: message,
-  status: "sent",
-  waMessageId: response.data?.messages?.[0]?.id || "",
-  waResponse: response.data,
-});
+    await saveMessage({
+      conversationId: finalConversationId,
+      direction: "out",
+      to,
+      clientId: clientId || "",
+      type: "text",
+      text: message,
+      status: "sent",
+      waMessageId,
+      waResponse: response.data,
+    });
 
     return res.json({
       success: true,
@@ -337,28 +410,23 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
     if (!to || !nome || !nome_rep || !emprs || !qtd || !rua || !cidade || !n) {
       return res.status(400).json({
         success: false,
-        error:
-          "Campos obrigatórios: to, nome, nome_rep, emprs, qtd, rua, cidade, n",
+        error: "Campos obrigatórios: to, nome, nome_rep, emprs, qtd, rua, cidade, n",
       });
     }
 
     let finalConversationId = conversationId || "";
 
-    let existingConversationDoc = null;
+    if (!finalConversationId) {
+      const existingConversation = await db
+        .collection("whatsapp_conversas")
+        .where("phone", "==", to)
+        .limit(1)
+        .get();
 
-if (!finalConversationId) {
-  const existingConversation = await db
-    .collection("whatsapp_conversas")
-    .where("phone", "==", to)
-    .limit(1)
-    .get();
-
-  if (!existingConversation.empty) {
-    existingConversationDoc = existingConversation.docs[0];
-    finalConversationId = existingConversationDoc.id;
-  }
-}
-      
+      if (!existingConversation.empty) {
+        finalConversationId = existingConversation.docs[0].id;
+      }
+    }
 
     const payload = {
       messaging_product: "whatsapp",
@@ -366,53 +434,23 @@ if (!finalConversationId) {
       type: "template",
       template: {
         name: "confirmar_pedido",
-        language: {
-          code: "pt_BR",
-        },
+        language: { code: "pt_BR" },
         components: [
           {
             type: "header",
             parameters: [
-              {
-                type: "text",
-                parameter_name: "nome",
-                text: nome,
-              },
+              { type: "text", parameter_name: "nome", text: nome },
             ],
           },
           {
             type: "body",
             parameters: [
-              {
-                type: "text",
-                parameter_name: "nome_rep",
-                text: nome_rep,
-              },
-              {
-                type: "text",
-                parameter_name: "emprs",
-                text: emprs,
-              },
-              {
-                type: "text",
-                parameter_name: "qtd",
-                text: qtd,
-              },
-              {
-                type: "text",
-                parameter_name: "rua",
-                text: rua,
-              },
-              {
-                type: "text",
-                parameter_name: "cidade",
-                text: cidade,
-              },
-              {
-                type: "text",
-                parameter_name: "n",
-                text: n,
-              },
+              { type: "text", parameter_name: "nome_rep", text: nome_rep },
+              { type: "text", parameter_name: "emprs", text: emprs },
+              { type: "text", parameter_name: "qtd", text: qtd },
+              { type: "text", parameter_name: "rua", text: rua },
+              { type: "text", parameter_name: "cidade", text: cidade },
+              { type: "text", parameter_name: "n", text: n },
             ],
           },
         ],
@@ -425,61 +463,66 @@ if (!finalConversationId) {
       { headers: graphHeaders() }
     );
 
+    const waMessageId = response.data?.messages?.[0]?.id || "";
+
     const textPreview =
       `Olá, ${nome}!\n\n` +
       `Aqui é o ${nome_rep}, da equipe da ${emprs}. Recebemos seu pedido de ${qtd} e ele será entregue no endereço abaixo:\n\n` +
       `📍 Rua: ${rua}, ${cidade}, n° ${n}\n\n` +
       `Você confirma o endereço?`;
 
-      if (!finalConversationId) {
-  const newConversationRef = await db.collection("whatsapp_conversas").add({
-    clientId: clientId || "",
-    name: nome || to,
-    phone: to,
-    product: qtd || "",
-    amount: "",
-    address: `${rua}, ${cidade}, n° ${n}`,
-    pipelineStatus: "aguardando_envio",
-    lastMessage: "",
-    lastTime: "",
-    unread: 0,
-    createdAt: nowISO(),
-    updatedAt: nowISO(),
-  });
+    if (finalConversationId) {
+      await db.collection("whatsapp_conversas").doc(finalConversationId).set(
+        {
+          clientId: clientId || "",
+          name: nome || to,
+          phone: to,
+          product: qtd || "",
+          address: `${rua}, ${cidade}, n° ${n}`,
+          lastMessage: "Template: confirmar endereço",
+          lastTime: nowISO(),
+          updatedAt: nowISO(),
+        },
+        { merge: true }
+      );
 
-  finalConversationId = newConversationRef.id;
-}
-
-    await db.collection("whatsapp_conversas").doc(finalConversationId).set(
-      {
+      await saveMessage({
+        conversationId: finalConversationId,
+        direction: "out",
+        to,
         clientId: clientId || "",
-        name: nome || to,
-        phone: to,
-        product: qtd || "",
-        address: `${rua}, ${cidade}, n° ${n}`,
-        lastMessage: "Template: confirmar endereço",
-        lastTime: nowISO(),
+        type: "template",
+        templateName: "confirmar_pedido",
+        text: textPreview,
+        status: "sent",
+        waMessageId,
+        waResponse: response.data,
+      });
+    } else {
+      await db.collection("whatsapp_template_pendentes").doc(waMessageId).set({
+        waMessageId,
+        to,
+        clientId: clientId || "",
+        nome,
+        nome_rep,
+        emprs,
+        qtd,
+        rua,
+        cidade,
+        n,
+        textPreview,
+        templateName: "confirmar_pedido",
+        status: "accepted",
+        createdAt: nowISO(),
         updatedAt: nowISO(),
-      },
-      { merge: true }
-    );
-
-    await saveMessage({
-      conversationId: finalConversationId,
-      direction: "out",
-      to,
-      clientId: clientId || "",
-      type: "template",
-      templateName: "confirmar_pedido",
-      text: textPreview,
-      status: "sent",
-      waMessageId: response.data?.messages?.[0]?.id || "",
-      waResponse: response.data,
-    });
+        waResponse: response.data,
+      });
+    }
 
     return res.json({
       success: true,
       conversationId: finalConversationId,
+      pending: !finalConversationId,
       data: response.data,
     });
   } catch (error) {
@@ -895,6 +938,7 @@ router.get("/media/:mediaId", async (req, res) => {
 });
 
 // ENVIAR IMAGEM
+// ENVIAR IMAGEM
 router.post("/send-image", upload.single("image"), async (req, res) => {
   try {
     const { to, clientId, conversationId, caption } = req.body;
@@ -925,6 +969,14 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
       if (!existingConversation.empty) {
         finalConversationId = existingConversation.docs[0].id;
       }
+    }
+
+    if (!finalConversationId) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Conversa não encontrada. Para enviar imagem, primeiro inicie a conversa com template.",
+      });
     }
 
     const form = new FormData();
@@ -1007,6 +1059,7 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
 });
 
 // ENVIAR DOCUMENTO
+// ENVIAR DOCUMENTO
 router.post("/send-document", upload.single("document"), async (req, res) => {
   try {
     const { to, clientId, conversationId, caption } = req.body;
@@ -1037,6 +1090,14 @@ router.post("/send-document", upload.single("document"), async (req, res) => {
       if (!existingConversation.empty) {
         finalConversationId = existingConversation.docs[0].id;
       }
+    }
+
+    if (!finalConversationId) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Conversa não encontrada. Para enviar documento, primeiro inicie a conversa com template.",
+      });
     }
 
     const form = new FormData();
