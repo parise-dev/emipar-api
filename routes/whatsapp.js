@@ -45,18 +45,18 @@ async function convertAudioToOgg(buffer, originalName = "audio.webm") {
 
   await new Promise((resolve, reject) => {
     ffmpeg(inputPath)
-      .inputOptions(["-y"])
       .noVideo()
       .audioCodec("libopus")
       .audioChannels(1)
       .audioFrequency(48000)
-      .audioBitrate("24k")
-      .format("opus")
+      .audioBitrate("32k")
+      .format("ogg")
       .outputOptions([
         "-application voip",
         "-frame_duration 20",
-        "-vbr off",
+        "-vbr on",
         "-compression_level 10",
+        "-avoid_negative_ts make_zero",
         "-map_metadata -1",
       ])
       .on("end", resolve)
@@ -65,6 +65,15 @@ async function convertAudioToOgg(buffer, originalName = "audio.webm") {
   });
 
   const convertedBuffer = fs.readFileSync(outputPath);
+
+  // IMPORTANTE: vamos salvar uma cópia para teste/debug.
+  const debugPath = path.join(tempDir, `debug-last-whatsapp-voice.ogg`);
+  fs.writeFileSync(debugPath, convertedBuffer);
+
+  console.log("Áudio convertido salvo para debug:", {
+    debugPath,
+    size: convertedBuffer.length,
+  });
 
   try {
     fs.unlinkSync(inputPath);
@@ -679,7 +688,7 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
 
     let audioBuffer = await convertAudioToOgg(req.file.buffer, originalName);
 let uploadFileName = `voice-${Date.now()}.ogg`;
-let uploadMimeType = "audio/ogg; codecs=opus";
+let uploadMimeType = "audio/ogg";
 
     const form = new FormData();
 
