@@ -49,16 +49,15 @@ async function convertAudioToOgg(buffer, originalName = "audio.webm") {
       .noVideo()
       .audioCodec("libopus")
       .audioChannels(1)
-      .audioFrequency(16000)
+      .audioFrequency(48000)
       .audioBitrate("24k")
-      .format("ogg")
+      .format("opus")
       .outputOptions([
         "-application voip",
         "-frame_duration 20",
-        "-packet_loss 5",
+        "-vbr off",
         "-compression_level 10",
         "-map_metadata -1",
-        "-fflags +bitexact",
       ])
       .on("end", resolve)
       .on("error", reject)
@@ -680,27 +679,30 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
 
     let audioBuffer = await convertAudioToOgg(req.file.buffer, originalName);
 let uploadFileName = `voice-${Date.now()}.ogg`;
-let uploadMimeType = "audio/ogg";
+let uploadMimeType = "audio/ogg; codecs=opus";
 
     const form = new FormData();
 
     form.append("messaging_product", "whatsapp");
     form.append("type", uploadMimeType);
     form.append("file", audioBuffer, {
-      filename: uploadFileName,
-      contentType: uploadMimeType,
-    });
+  filename: uploadFileName,
+  contentType: uploadMimeType,
+  knownLength: audioBuffer.length,
+});
 
-    const mediaResponse = await axios.post(
-      `${GRAPH_URL}/${PHONE_NUMBER_ID}/media`,
-      form,
-      {
-        headers: {
-          Authorization: `Bearer ${TOKEN}`,
-          ...form.getHeaders(),
-        },
-      }
-    );
+   const mediaResponse = await axios.post(
+  `${GRAPH_URL}/${PHONE_NUMBER_ID}/media`,
+  form,
+  {
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      ...form.getHeaders(),
+    },
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+  }
+);
 
     const mediaId = mediaResponse.data.id;
 
