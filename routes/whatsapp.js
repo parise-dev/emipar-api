@@ -35,25 +35,30 @@ function nowISO() {
 async function convertAudioToOgg(buffer, originalName = "audio.webm") {
   const tempDir = os.tmpdir();
 
+  const timestamp = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
   const inputExt = path.extname(originalName) || ".webm";
-  const inputPath = path.join(tempDir, `input-${Date.now()}${inputExt}`);
-  const outputPath = path.join(tempDir, `output-${Date.now()}.ogg`);
+
+  const inputPath = path.join(tempDir, `input-${timestamp}${inputExt}`);
+  const outputPath = path.join(tempDir, `output-${timestamp}.ogg`);
 
   fs.writeFileSync(inputPath, buffer);
 
   await new Promise((resolve, reject) => {
     ffmpeg(inputPath)
+      .noVideo()
       .audioCodec("libopus")
+      .audioChannels(1)
+      .audioFrequency(48000)
       .audioBitrate("32k")
       .format("ogg")
       .outputOptions([
-        "-vn",
-        "-ac 1",
-        "-ar 48000",
+        "-application voip",
+        "-compression_level 10",
+        "-map_metadata -1",
       ])
-      .save(outputPath)
       .on("end", resolve)
-      .on("error", reject);
+      .on("error", reject)
+      .save(outputPath);
   });
 
   const convertedBuffer = fs.readFileSync(outputPath);
@@ -669,17 +674,9 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
       size: req.file.size,
     });
 
-    let audioBuffer = req.file.buffer;
-    let uploadFileName = "audio.ogg";
-    let uploadMimeType = "audio/ogg";
-
-    const alreadyOgg =
-      originalMimeType.includes("ogg") ||
-      originalName.toLowerCase().endsWith(".ogg");
-
-    if (!alreadyOgg) {
-      audioBuffer = await convertAudioToOgg(req.file.buffer, originalName);
-    }
+    let audioBuffer = await convertAudioToOgg(req.file.buffer, originalName);
+let uploadFileName = `audio-${Date.now()}.ogg`;
+let uploadMimeType = "audio/ogg";
 
     const form = new FormData();
 
@@ -704,14 +701,13 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
     const mediaId = mediaResponse.data.id;
 
     const payload = {
-      messaging_product: "whatsapp",
-      to: normalizedTo,
-      type: "audio",
-      audio: {
-        id: mediaId,
-        voice: true,
-      },
-    };
+  messaging_product: "whatsapp",
+  to: normalizedTo,
+  type: "audio",
+  audio: {
+    id: mediaId,
+  },
+};
 
     const sendResponse = await axios.post(
       `${GRAPH_URL}/${PHONE_NUMBER_ID}/messages`,
