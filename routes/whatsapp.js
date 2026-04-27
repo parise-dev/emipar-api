@@ -2,7 +2,14 @@ const express = require("express");
 const axios = require("axios");
 const multer = require("multer");
 const FormData = require("form-data");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const ffmpeg = require("fluent-ffmpeg");
+const ffmpegPath = require("ffmpeg-static");  
 const db = require("../firebase");
+
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -23,6 +30,43 @@ function graphHeaders() {
 
 function nowISO() {
   return new Date().toISOString();
+}
+
+async function convertAudioToOgg(buffer, originalName = "audio.webm") {
+  const tempDir = os.tmpdir();
+
+  const inputExt = path.extname(originalName) || ".webm";
+  const inputPath = path.join(tempDir, `input-${Date.now()}${inputExt}`);
+  const outputPath = path.join(tempDir, `output-${Date.now()}.ogg`);
+
+  fs.writeFileSync(inputPath, buffer);
+
+  await new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .audioCodec("libopus")
+      .audioBitrate("32k")
+      .format("ogg")
+      .outputOptions([
+        "-vn",
+        "-ac 1",
+        "-ar 48000",
+      ])
+      .save(outputPath)
+      .on("end", resolve)
+      .on("error", reject);
+  });
+
+  const convertedBuffer = fs.readFileSync(outputPath);
+
+  try {
+    fs.unlinkSync(inputPath);
+  } catch {}
+
+  try {
+    fs.unlinkSync(outputPath);
+  } catch {}
+
+  return convertedBuffer;
 }
 
 function normalizeWaPhone(phone = "") {
@@ -616,12 +660,34 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
       });
     }
 
+    const originalMimeType = req.file.mimetype || "";
+    const originalName = req.file.originalname || "audio.webm";
+
+    console.log("Áudio recebido:", {
+      originalName,
+      originalMimeType,
+      size: req.file.size,
+    });
+
+    let audioBuffer = req.file.buffer;
+    let uploadFileName = "audio.ogg";
+    let uploadMimeType = "audio/ogg";
+
+    const alreadyOgg =
+      originalMimeType.includes("ogg") ||
+      originalName.toLowerCase().endsWith(".ogg");
+
+    if (!alreadyOgg) {
+      audioBuffer = await convertAudioToOgg(req.file.buffer, originalName);
+    }
+
     const form = new FormData();
+
     form.append("messaging_product", "whatsapp");
-    form.append("type", req.file.mimetype || "audio/ogg");
-    form.append("file", req.file.buffer, {
-      filename: req.file.originalname || "audio.ogg",
-      contentType: req.file.mimetype || "audio/ogg",
+    form.append("type", uploadMimeType);
+    form.append("file", audioBuffer, {
+      filename: uploadFileName,
+      contentType: uploadMimeType,
     });
 
     const mediaResponse = await axios.post(
@@ -637,24 +703,22 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
 
     const mediaId = mediaResponse.data.id;
 
-    const isVoiceNote =
-      (req.file.originalname || "").endsWith(".ogg") ||
-      (req.file.mimetype || "").includes("ogg");
-
     const payload = {
       messaging_product: "whatsapp",
       to: normalizedTo,
       type: "audio",
       audio: {
         id: mediaId,
-        voice: isVoiceNote,
+        voice: true,
       },
     };
 
     const sendResponse = await axios.post(
       `${GRAPH_URL}/${PHONE_NUMBER_ID}/messages`,
       payload,
-      { headers: graphHeaders() }
+      {
+        headers: graphHeaders(),
+      }
     );
 
     await db.collection("whatsapp_conversas").doc(finalConversationId).set(
@@ -676,7 +740,7 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
       type: "audio",
       text: "🎤 Áudio",
       mediaId,
-      mimeType: req.file.mimetype || "audio/ogg",
+      mimeType: uploadMimeType,
       status: "sent",
       waMessageId: sendResponse.data?.messages?.[0]?.id || "",
       waResponse: sendResponse.data,
@@ -689,7 +753,11 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
       data: sendResponse.data,
     });
   } catch (error) {
-    console.error("Erro send-audio:", error.response?.data || error.message);
+    console.error("Erro send-audio:", {
+      message: error.message,
+      response: error.response?.data,
+      stack: error.stack,
+    });
 
     return res.status(500).json({
       success: false,
