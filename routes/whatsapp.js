@@ -39,22 +39,26 @@ async function convertAudioToOgg(buffer, originalName = "audio.webm") {
   const inputExt = path.extname(originalName) || ".webm";
 
   const inputPath = path.join(tempDir, `input-${timestamp}${inputExt}`);
-  const outputPath = path.join(tempDir, `output-${timestamp}.ogg`);
+  const outputPath = path.join(tempDir, `voice-${timestamp}.ogg`);
 
   fs.writeFileSync(inputPath, buffer);
 
   await new Promise((resolve, reject) => {
     ffmpeg(inputPath)
+      .inputOptions(["-y"])
       .noVideo()
       .audioCodec("libopus")
       .audioChannels(1)
-      .audioFrequency(48000)
-      .audioBitrate("32k")
+      .audioFrequency(16000)
+      .audioBitrate("24k")
       .format("ogg")
       .outputOptions([
         "-application voip",
+        "-frame_duration 20",
+        "-packet_loss 5",
         "-compression_level 10",
         "-map_metadata -1",
+        "-fflags +bitexact",
       ])
       .on("end", resolve)
       .on("error", reject)
@@ -675,7 +679,7 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
     });
 
     let audioBuffer = await convertAudioToOgg(req.file.buffer, originalName);
-let uploadFileName = `audio-${Date.now()}.ogg`;
+let uploadFileName = `voice-${Date.now()}.ogg`;
 let uploadMimeType = "audio/ogg";
 
     const form = new FormData();
