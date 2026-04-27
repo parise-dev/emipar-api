@@ -706,6 +706,7 @@ let uploadMimeType = "audio/ogg";
   type: "audio",
   audio: {
     id: mediaId,
+    voice: true,
   },
 };
 
