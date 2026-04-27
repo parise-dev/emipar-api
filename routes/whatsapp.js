@@ -25,6 +25,18 @@ function nowISO() {
   return new Date().toISOString();
 }
 
+function normalizeWaPhone(phone = "") {
+  const onlyNumbers = String(phone).replace(/\D/g, "");
+
+  if (!onlyNumbers) return "";
+
+  if (onlyNumbers.startsWith("55")) {
+    return onlyNumbers;
+  }
+
+  return `55${onlyNumbers}`;
+}
+
 async function saveMessage(data) {
   await db.collection("whatsapp_mensagens").add({
     ...data,
@@ -74,7 +86,7 @@ router.post("/webhook", async (req, res) => {
 
         for (const msg of messages) {
           const contact = contacts?.[0];
-          const from = msg.from;
+          const from = normalizeWaPhone(msg.from);
           const contactName = contact?.profile?.name || from;
 
           let text = "";
@@ -216,6 +228,8 @@ if (mediaId) {
 const pendingRef = db.collection("whatsapp_template_pendentes").doc(status.id);
 const pendingSnap = await pendingRef.get();
 
+
+
 if (pendingSnap.exists) {
   const pending = pendingSnap.data();
 
@@ -324,8 +338,9 @@ if (pendingSnap.exists) {
 router.post("/send-text", async (req, res) => {
   try {
     const { to, message, clientId, conversationId } = req.body;
+    const normalizedTo = normalizeWaPhone(to);
 
-    if (!to || !message) {
+    if (!normalizedTo || !message) {
       return res.status(400).json({
         success: false,
         error: "Campos obrigatórios: to, message",
@@ -337,7 +352,7 @@ router.post("/send-text", async (req, res) => {
     if (!finalConversationId) {
       const existingConversation = await db
         .collection("whatsapp_conversas")
-        .where("phone", "==", to)
+        .where("phone", "==", normalizedTo)
         .limit(1)
         .get();
 
@@ -348,7 +363,7 @@ router.post("/send-text", async (req, res) => {
 
     const payload = {
       messaging_product: "whatsapp",
-      to,
+      to: normalizedTo,
       type: "text",
       text: {
         body: message,
@@ -375,7 +390,7 @@ router.post("/send-text", async (req, res) => {
     await db.collection("whatsapp_conversas").doc(finalConversationId).set(
       {
         clientId: clientId || "",
-        phone: to,
+        phone: normalizedTo,
         lastMessage: message,
         lastTime: nowISO(),
         updatedAt: nowISO(),
@@ -386,7 +401,7 @@ router.post("/send-text", async (req, res) => {
     await saveMessage({
       conversationId: finalConversationId,
       direction: "out",
-      to,
+      to: normalizedTo,
       clientId: clientId || "",
       type: "text",
       text: message,
@@ -427,7 +442,9 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
       n,
     } = req.body;
 
-    if (!to || !nome || !nome_rep || !emprs || !qtd || !rua || !cidade || !n) {
+    const normalizedTo = normalizeWaPhone(to);
+
+    if (!normalizedTo || !nome || !nome_rep || !emprs || !qtd || !rua || !cidade || !n) {
       return res.status(400).json({
         success: false,
         error: "Campos obrigatórios: to, nome, nome_rep, emprs, qtd, rua, cidade, n",
@@ -439,7 +456,7 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
     if (!finalConversationId) {
       const existingConversation = await db
         .collection("whatsapp_conversas")
-        .where("phone", "==", to)
+        .where("phone", "==", normalizedTo)
         .limit(1)
         .get();
 
@@ -450,7 +467,7 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
 
     const payload = {
       messaging_product: "whatsapp",
-      to,
+      to: normalizedTo,
       type: "template",
       template: {
         name: "confirmar_pedido",
@@ -495,8 +512,8 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
       await db.collection("whatsapp_conversas").doc(finalConversationId).set(
         {
           clientId: clientId || "",
-          name: nome || to,
-          phone: to,
+          name: nome || normalizedTo,
+          phone: normalizedTo,
           product: qtd || "",
           address: `${rua}, ${cidade}, n° ${n}`,
           lastMessage: "Template: confirmar endereço",
@@ -509,7 +526,7 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
       await saveMessage({
         conversationId: finalConversationId,
         direction: "out",
-        to,
+        to: normalizedTo,
         clientId: clientId || "",
         type: "template",
         templateName: "confirmar_pedido",
@@ -521,7 +538,7 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
     } else {
       await db.collection("whatsapp_template_pendentes").doc(waMessageId).set({
         waMessageId,
-        to,
+        to: normalizedTo,
         clientId: clientId || "",
         nome,
         nome_rep,
@@ -557,11 +574,13 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
 
 // ENVIAR ÁUDIO
 // ENVIAR ÁUDIO / VOICE NOTE
+// ENVIAR ÁUDIO / VOICE NOTE
 router.post("/send-audio", upload.single("audio"), async (req, res) => {
   try {
     const { to, clientId, conversationId } = req.body;
+    const normalizedTo = normalizeWaPhone(to);
 
-    if (!to) {
+    if (!normalizedTo) {
       return res.status(400).json({
         success: false,
         error: "Campo obrigatório: to",
@@ -580,27 +599,21 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
     if (!finalConversationId) {
       const existingConversation = await db
         .collection("whatsapp_conversas")
-        .where("phone", "==", to)
+        .where("phone", "==", normalizedTo)
         .limit(1)
         .get();
 
       if (!existingConversation.empty) {
         finalConversationId = existingConversation.docs[0].id;
-      } else {
-        const newConversationRef = await db.collection("whatsapp_conversas").add({
-          clientId: clientId || "",
-          name: to,
-          phone: to,
-          pipelineStatus: "aguardando_envio",
-          lastMessage: "",
-          lastTime: "",
-          unread: 0,
-          createdAt: nowISO(),
-          updatedAt: nowISO(),
-        });
-
-        finalConversationId = newConversationRef.id;
       }
+    }
+
+    if (!finalConversationId) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Conversa não encontrada. Para enviar áudio, primeiro inicie a conversa com template.",
+      });
     }
 
     const form = new FormData();
@@ -630,7 +643,7 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
 
     const payload = {
       messaging_product: "whatsapp",
-      to,
+      to: normalizedTo,
       type: "audio",
       audio: {
         id: mediaId,
@@ -647,7 +660,7 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
     await db.collection("whatsapp_conversas").doc(finalConversationId).set(
       {
         clientId: clientId || "",
-        phone: to,
+        phone: normalizedTo,
         lastMessage: "🎤 Áudio",
         lastTime: nowISO(),
         updatedAt: nowISO(),
@@ -658,7 +671,7 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
     await saveMessage({
       conversationId: finalConversationId,
       direction: "out",
-      to,
+      to: normalizedTo,
       clientId: clientId || "",
       type: "audio",
       text: "🎤 Áudio",
@@ -959,11 +972,13 @@ router.get("/media/:mediaId", async (req, res) => {
 
 // ENVIAR IMAGEM
 // ENVIAR IMAGEM
+// ENVIAR IMAGEM
 router.post("/send-image", upload.single("image"), async (req, res) => {
   try {
     const { to, clientId, conversationId, caption } = req.body;
+    const normalizedTo = normalizeWaPhone(to);
 
-    if (!to) {
+    if (!normalizedTo) {
       return res.status(400).json({
         success: false,
         error: "Campo obrigatório: to",
@@ -982,7 +997,7 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
     if (!finalConversationId) {
       const existingConversation = await db
         .collection("whatsapp_conversas")
-        .where("phone", "==", to)
+        .where("phone", "==", normalizedTo)
         .limit(1)
         .get();
 
@@ -1022,7 +1037,7 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
 
     const payload = {
       messaging_product: "whatsapp",
-      to,
+      to: normalizedTo,
       type: "image",
       image: {
         id: mediaId,
@@ -1039,7 +1054,7 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
     await db.collection("whatsapp_conversas").doc(finalConversationId).set(
       {
         clientId: clientId || "",
-        phone: to,
+        phone: normalizedTo,
         lastMessage: caption || "🖼️ Imagem",
         lastTime: nowISO(),
         updatedAt: nowISO(),
@@ -1050,7 +1065,7 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
     await saveMessage({
       conversationId: finalConversationId,
       direction: "out",
-      to,
+      to: normalizedTo,
       clientId: clientId || "",
       type: "image",
       text: caption || "",
@@ -1080,11 +1095,13 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
 
 // ENVIAR DOCUMENTO
 // ENVIAR DOCUMENTO
+// ENVIAR DOCUMENTO
 router.post("/send-document", upload.single("document"), async (req, res) => {
   try {
     const { to, clientId, conversationId, caption } = req.body;
+    const normalizedTo = normalizeWaPhone(to);
 
-    if (!to) {
+    if (!normalizedTo) {
       return res.status(400).json({
         success: false,
         error: "Campo obrigatório: to",
@@ -1103,7 +1120,7 @@ router.post("/send-document", upload.single("document"), async (req, res) => {
     if (!finalConversationId) {
       const existingConversation = await db
         .collection("whatsapp_conversas")
-        .where("phone", "==", to)
+        .where("phone", "==", normalizedTo)
         .limit(1)
         .get();
 
@@ -1143,7 +1160,7 @@ router.post("/send-document", upload.single("document"), async (req, res) => {
 
     const payload = {
       messaging_product: "whatsapp",
-      to,
+      to: normalizedTo,
       type: "document",
       document: {
         id: mediaId,
@@ -1161,7 +1178,7 @@ router.post("/send-document", upload.single("document"), async (req, res) => {
     await db.collection("whatsapp_conversas").doc(finalConversationId).set(
       {
         clientId: clientId || "",
-        phone: to,
+        phone: normalizedTo,
         lastMessage: `📄 ${req.file.originalname || "Documento"}`,
         lastTime: nowISO(),
         updatedAt: nowISO(),
@@ -1172,7 +1189,7 @@ router.post("/send-document", upload.single("document"), async (req, res) => {
     await saveMessage({
       conversationId: finalConversationId,
       direction: "out",
-      to,
+      to: normalizedTo,
       clientId: clientId || "",
       type: "document",
       text: caption || `📄 ${req.file.originalname || "Documento"}`,
@@ -1204,8 +1221,9 @@ router.post("/send-document", upload.single("document"), async (req, res) => {
 router.get("/conversations/find", async (req, res) => {
   try {
     const { phone, clientId } = req.query;
+    const normalizedPhone = normalizeWaPhone(phone || "");
 
-    if (!phone && !clientId) {
+    if (!normalizedPhone && !clientId) {
       return res.status(400).json({
         success: false,
         error: "Informe phone ou clientId",
@@ -1222,10 +1240,10 @@ router.get("/conversations/find", async (req, res) => {
         .get();
     }
 
-    if ((!snapshot || snapshot.empty) && phone) {
+    if ((!snapshot || snapshot.empty) && normalizedPhone) {
       snapshot = await db
         .collection("whatsapp_conversas")
-        .where("phone", "==", String(phone))
+        .where("phone", "==", normalizedPhone)
         .limit(1)
         .get();
     }
