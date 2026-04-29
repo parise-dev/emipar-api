@@ -821,12 +821,20 @@ router.post("/send-template/cod-rastreio", async (req, res) => {
     .collection("whatsapp_mensagens")
     .where("conversationId", "==", finalConversationId)
     .where("templateName", "==", "cod_rastreio")
-    .orderBy("createdAt", "desc")
-    .limit(1)
+    .limit(10)
     .get();
 
   if (!recentTemplateSnapshot.empty) {
-    const lastTemplate = recentTemplateSnapshot.docs[0].data();
+    const templates = recentTemplateSnapshot.docs
+      .map((doc) => doc.data())
+      .sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0).getTime();
+        const dateB = new Date(b.createdAt || 0).getTime();
+
+        return dateB - dateA;
+      });
+
+    const lastTemplate = templates[0];
     const lastCreatedAt = new Date(lastTemplate.createdAt || 0).getTime();
     const now = Date.now();
 
