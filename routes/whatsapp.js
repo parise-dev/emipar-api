@@ -6,7 +6,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const ffmpeg = require("fluent-ffmpeg");
-const ffmpegPath = require("ffmpeg-static");  
+const ffmpegPath = require("ffmpeg-static");
 const db = require("../firebase");
 
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -66,7 +66,6 @@ async function convertAudioToOgg(buffer, originalName = "audio.webm") {
 
   const convertedBuffer = fs.readFileSync(outputPath);
 
-  // IMPORTANTE: vamos salvar uma cópia para teste/debug.
   const debugPath = path.join(tempDir, `debug-last-whatsapp-voice.ogg`);
   fs.writeFileSync(debugPath, convertedBuffer);
 
@@ -115,7 +114,6 @@ async function getWhatsappMediaUrl(mediaId) {
   return response.data?.url || "";
 }
 
-
 // WEBHOOK VERIFY
 router.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -129,7 +127,6 @@ router.get("/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
-// WEBHOOK RECEIVE
 // WEBHOOK RECEIVE
 router.post("/webhook", async (req, res) => {
   try {
@@ -151,58 +148,110 @@ router.post("/webhook", async (req, res) => {
           const contactName = contact?.profile?.name || from;
 
           let text = "";
-let mediaId = "";
-let mediaUrl = "";
-let mimeType = "";
-let fileName = "";
+          let mediaId = "";
+          let mediaUrl = "";
+          let mimeType = "";
+          let fileName = "";
 
-if (msg.type === "text") {
-  text = msg.text?.body || "";
-}
+          if (msg.type === "text") {
+            text = msg.text?.body || "";
+          }
 
-if (msg.type === "button") {
-  text = msg.button?.text || "";
-}
+          if (msg.type === "button") {
+            text = msg.button?.text || msg.button?.payload || "Botão clicado";
+          }
 
-if (msg.type === "interactive") {
-  text =
-    msg.interactive?.button_reply?.title ||
-    msg.interactive?.list_reply?.title ||
-    "";
-}
+          if (msg.type === "interactive") {
+            text =
+              msg.interactive?.button_reply?.title ||
+              msg.interactive?.list_reply?.title ||
+              "Resposta interativa";
+          }
 
-if (msg.type === "audio") {
-  mediaId = msg.audio?.id || "";
-  mimeType = msg.audio?.mime_type || "";
-  text = "🎤 Áudio recebido";
-}
+          if (msg.type === "reaction") {
+            const emoji = msg.reaction?.emoji || "";
+            const reactedMessageId = msg.reaction?.message_id || "";
 
-if (msg.type === "image") {
-  mediaId = msg.image?.id || "";
-  mimeType = msg.image?.mime_type || "";
-  text = msg.image?.caption || "🖼️ Imagem recebida";
-}
+            text = emoji ? `Reagiu com ${emoji}` : "Removeu uma reação";
+            fileName = reactedMessageId;
+          }
 
-if (msg.type === "document") {
-  mediaId = msg.document?.id || "";
-  mimeType = msg.document?.mime_type || "";
-  fileName = msg.document?.filename || "";
-  text = msg.document?.caption || `📄 Documento recebido${fileName ? `: ${fileName}` : ""}`;
-}
+          if (msg.type === "sticker") {
+            mediaId = msg.sticker?.id || "";
+            mimeType = msg.sticker?.mime_type || "";
+            text = "Figurinha recebida";
+          }
 
-if (msg.type === "video") {
-  mediaId = msg.video?.id || "";
-  mimeType = msg.video?.mime_type || "";
-  text = msg.video?.caption || "🎥 Vídeo recebido";
-}
+          if (msg.type === "audio") {
+            mediaId = msg.audio?.id || "";
+            mimeType = msg.audio?.mime_type || "";
+            text = "🎤 Áudio recebido";
+          }
 
-if (mediaId) {
-  try {
-    mediaUrl = await getWhatsappMediaUrl(mediaId);
-  } catch (mediaError) {
-    console.error("Erro ao buscar URL da mídia:", mediaError.response?.data || mediaError.message);
-  }
-}
+          if (msg.type === "image") {
+            mediaId = msg.image?.id || "";
+            mimeType = msg.image?.mime_type || "";
+            text = msg.image?.caption || "🖼️ Imagem recebida";
+          }
+
+          if (msg.type === "document") {
+            mediaId = msg.document?.id || "";
+            mimeType = msg.document?.mime_type || "";
+            fileName = msg.document?.filename || "";
+            text =
+              msg.document?.caption ||
+              `📄 Documento recebido${fileName ? `: ${fileName}` : ""}`;
+          }
+
+          if (msg.type === "video") {
+            mediaId = msg.video?.id || "";
+            mimeType = msg.video?.mime_type || "";
+            text = msg.video?.caption || "🎥 Vídeo recebido";
+          }
+
+          if (msg.type === "location") {
+            const latitude = msg.location?.latitude;
+            const longitude = msg.location?.longitude;
+            const name = msg.location?.name || "";
+            const address = msg.location?.address || "";
+
+            text = `📍 Localização recebida${name ? `: ${name}` : ""}${
+              address ? ` - ${address}` : ""
+            }`;
+
+            fileName = latitude && longitude ? `${latitude},${longitude}` : "";
+          }
+
+          if (msg.type === "contacts") {
+            const receivedContacts = msg.contacts || [];
+            const firstContact = receivedContacts[0];
+
+            const contactReceivedName =
+              firstContact?.name?.formatted_name ||
+              firstContact?.name?.first_name ||
+              "Contato";
+
+            text = `👤 Contato recebido: ${contactReceivedName}`;
+          }
+
+          if (msg.type === "unsupported") {
+            text = "Mensagem não suportada pelo WhatsApp Business API";
+          }
+
+          if (!text) {
+            text = `[${msg.type || "mensagem"}]`;
+          }
+
+          if (mediaId) {
+            try {
+              mediaUrl = await getWhatsappMediaUrl(mediaId);
+            } catch (mediaError) {
+              console.error(
+                "Erro ao buscar URL da mídia:",
+                mediaError.response?.data || mediaError.message
+              );
+            }
+          }
 
           const existingConversation = await db
             .collection("whatsapp_conversas")
@@ -219,7 +268,7 @@ if (mediaId) {
               {
                 name: contactName,
                 phone: from,
-                lastMessage: text || `[${msg.type}]`,
+                lastMessage: text,
                 lastTime: nowISO(),
                 unread: (existingConversation.docs[0].data().unread || 0) + 1,
                 updatedAt: nowISO(),
@@ -234,7 +283,7 @@ if (mediaId) {
                 name: contactName,
                 phone: from,
                 pipelineStatus: "aguardando_envio",
-                lastMessage: text || `[${msg.type}]`,
+                lastMessage: text,
                 lastTime: nowISO(),
                 unread: 1,
                 createdAt: nowISO(),
@@ -245,19 +294,19 @@ if (mediaId) {
           }
 
           await saveMessage({
-  conversationId,
-  direction: "in",
-  waMessageId: msg.id,
-  from,
-  contactName,
-  type: msg.type,
-  text,
-  mediaId,
-  mediaUrl,
-  mimeType,
-  fileName,
-  raw: msg,
-});
+            conversationId,
+            direction: "in",
+            waMessageId: msg.id,
+            from,
+            contactName,
+            type: msg.type || "unknown",
+            text,
+            mediaId,
+            mediaUrl,
+            mimeType,
+            fileName,
+            raw: msg,
+          });
         }
 
         for (const status of statuses) {
@@ -271,117 +320,130 @@ if (mediaId) {
           });
 
           const sentMessages = await db
-  .collection("whatsapp_mensagens")
-  .where("waMessageId", "==", status.id)
-  .limit(1)
-  .get();
+            .collection("whatsapp_mensagens")
+            .where("waMessageId", "==", status.id)
+            .limit(1)
+            .get();
 
-         if (!sentMessages.empty) {
-  await sentMessages.docs[0].ref.set(
-    {
-      status: status.status,
-      statusUpdatedAt: nowISO(),
-    },
-    { merge: true }
-  );
-}
+          if (!sentMessages.empty) {
+            await sentMessages.docs[0].ref.set(
+              {
+                status: status.status,
+                statusUpdatedAt: nowISO(),
+              },
+              { merge: true }
+            );
+          }
 
-const pendingRef = db.collection("whatsapp_template_pendentes").doc(status.id);
-const pendingSnap = await pendingRef.get();
+          const pendingRef = db
+            .collection("whatsapp_template_pendentes")
+            .doc(status.id);
 
+          const pendingSnap = await pendingRef.get();
 
+          if (pendingSnap.exists) {
+            const pending = pendingSnap.data();
 
-if (pendingSnap.exists) {
-  const pending = pendingSnap.data();
+            if (status.status === "failed") {
+              await pendingRef.set(
+                {
+                  status: "failed",
+                  failedAt: nowISO(),
+                  rawStatus: status,
+                  updatedAt: nowISO(),
+                },
+                { merge: true }
+              );
+            }
 
-  if (status.status === "failed") {
-    await pendingRef.set(
-      {
-        status: "failed",
-        failedAt: nowISO(),
-        rawStatus: status,
-        updatedAt: nowISO(),
-      },
-      { merge: true }
-    );
-  }
+            if (["sent", "delivered", "read"].includes(status.status)) {
+              const existingConversation = await db
+                .collection("whatsapp_conversas")
+                .where("phone", "==", pending.to)
+                .limit(1)
+                .get();
 
-  if (["sent", "delivered", "read"].includes(status.status)) {
-    const existingConversation = await db
-      .collection("whatsapp_conversas")
-      .where("phone", "==", pending.to)
-      .limit(1)
-      .get();
+              let conversationId = "";
 
-    let conversationId = "";
+              if (!existingConversation.empty) {
+                conversationId = existingConversation.docs[0].id;
+              } else {
+                const newConversationRef = await db
+                  .collection("whatsapp_conversas")
+                  .add({
+                    clientId: pending.clientId || "",
+                    name: pending.nome || pending.to,
+                    phone: pending.to,
+                    product: pending.qtd || "",
+                    amount: "",
+                    address:
+                      pending.rua && pending.cidade && pending.n
+                        ? `${pending.rua}, ${pending.cidade}, n° ${pending.n}`
+                        : "",
+                    codigo_rastreio: pending.codigo_rastreio || "",
+                    pipelineStatus: "aguardando_envio",
+                    lastMessage:
+                      pending.templateName === "cod_rastreio"
+                        ? "Template: código de rastreio"
+                        : "Template: confirmar endereço",
+                    lastTime: nowISO(),
+                    unread: 0,
+                    createdAt: nowISO(),
+                    updatedAt: nowISO(),
+                  });
 
-    if (!existingConversation.empty) {
-      conversationId = existingConversation.docs[0].id;
-    } else {
-      const newConversationRef = await db.collection("whatsapp_conversas").add({
-        clientId: pending.clientId || "",
-        name: pending.nome || pending.to,
-        phone: pending.to,
-        product: pending.qtd || "",
-        amount: "",
-        address: `${pending.rua}, ${pending.cidade}, n° ${pending.n}`,
-        pipelineStatus: "aguardando_envio",
-        lastMessage: "Template: confirmar endereço",
-        lastTime: nowISO(),
-        unread: 0,
-        createdAt: nowISO(),
-        updatedAt: nowISO(),
-      });
+                conversationId = newConversationRef.id;
+              }
 
-      conversationId = newConversationRef.id;
-    }
+              await saveMessage({
+                conversationId,
+                direction: "out",
+                to: pending.to,
+                clientId: pending.clientId || "",
+                type: "template",
+                templateName: pending.templateName || "confirmar_pedido",
+                text: pending.textPreview,
+                status: status.status,
+                waMessageId: pending.waMessageId,
+                waResponse: pending.waResponse,
+              });
 
-    await saveMessage({
-      conversationId,
-      direction: "out",
-      to: pending.to,
-      clientId: pending.clientId || "",
-      type: "template",
-      templateName: pending.templateName || "confirmar_pedido",
-      text: pending.textPreview,
-      status: status.status,
-      waMessageId: pending.waMessageId,
-      waResponse: pending.waResponse,
-    });
+              if (pending.clientId) {
+                const clienteRef = db.collection("clientes").doc(pending.clientId);
+                const clienteSnap = await clienteRef.get();
 
-    if (pending.clientId) {
-  const clienteRef = db.collection("clientes").doc(pending.clientId);
-  const clienteSnap = await clienteRef.get();
+                if (clienteSnap.exists) {
+                  const cliente = clienteSnap.data();
+                  const statusPedido = cliente.status_pedido;
 
-  if (clienteSnap.exists) {
-    const cliente = clienteSnap.data();
-    const statusPedido = cliente.status_pedido;
+                  if (statusPedido === "Novo" || statusPedido === "Aberto") {
+                    await clienteRef.set(
+                      {
+                        status_pedido: "Andamento",
+                        updatedAt: nowISO(),
+                      },
+                      { merge: true }
+                    );
+                  }
+                }
+              }
 
-    if (statusPedido === "Novo" || statusPedido === "Aberto") {
-      await clienteRef.set(
-        {
-          status_pedido: "Andamento",
-          updatedAt: nowISO(),
-        },
-        { merge: true }
-      );
-    }
-  }
-}
+              await db.collection("whatsapp_conversas").doc(conversationId).set(
+                {
+                  codigo_rastreio: pending.codigo_rastreio || "",
+                  lastMessage:
+                    pending.templateName === "cod_rastreio"
+                      ? "Template: código de rastreio"
+                      : "Template: confirmar endereço",
+                  lastTime: nowISO(),
+                  updatedAt: nowISO(),
+                },
+                { merge: true }
+              );
 
-    await db.collection("whatsapp_conversas").doc(conversationId).set(
-      {
-        lastMessage: "Template: confirmar endereço",
-        lastTime: nowISO(),
-        updatedAt: nowISO(),
-      },
-      { merge: true }
-    );
-
-    await pendingRef.delete();
-  }
-}
-
+              await pendingRef.delete();
+            }
+          }
         }
       }
     }
@@ -393,8 +455,6 @@ if (pendingSnap.exists) {
   }
 });
 
-// ENVIAR TEXTO
-// ENVIAR TEXTO
 // ENVIAR TEXTO
 router.post("/send-text", async (req, res) => {
   try {
@@ -487,7 +547,6 @@ router.post("/send-text", async (req, res) => {
 });
 
 // ENVIAR TEMPLATE CONFIRMAR PEDIDO
-// ENVIAR TEMPLATE CONFIRMAR PEDIDO
 router.post("/send-template/confirmar-pedido", async (req, res) => {
   try {
     const {
@@ -536,9 +595,7 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
         components: [
           {
             type: "header",
-            parameters: [
-              { type: "text", parameter_name: "nome", text: nome },
-            ],
+            parameters: [{ type: "text", parameter_name: "nome", text: nome }],
           },
           {
             type: "body",
@@ -633,8 +690,169 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
   }
 });
 
-// ENVIAR ÁUDIO
-// ENVIAR ÁUDIO / VOICE NOTE
+// ENVIAR TEMPLATE CÓDIGO DE RASTREIO
+router.post("/send-template/cod-rastreio", async (req, res) => {
+  try {
+    const { to, clientId, conversationId, nome, codigo_rastreio } = req.body;
+
+    const normalizedTo = normalizeWaPhone(to);
+
+    if (!normalizedTo) {
+      return res.status(400).json({
+        success: false,
+        error: "Campo obrigatório: to",
+      });
+    }
+
+    let finalConversationId = conversationId || "";
+    let finalNome = nome || "";
+    let finalCodigoRastreio = codigo_rastreio || "";
+
+    if (clientId) {
+      const clienteRef = db.collection("clientes").doc(String(clientId));
+      const clienteSnap = await clienteRef.get();
+
+      if (clienteSnap.exists) {
+        const cliente = clienteSnap.data();
+
+        finalNome =
+          finalNome ||
+          cliente.nome ||
+          cliente.name ||
+          cliente.cliente ||
+          "";
+
+        finalCodigoRastreio =
+          finalCodigoRastreio ||
+          cliente.codigo_rastreio ||
+          cliente.cod_rastreio ||
+          cliente.rastreio ||
+          cliente.codigoRastreio ||
+          "";
+      }
+    }
+
+    if (!finalNome) {
+      finalNome = normalizedTo;
+    }
+
+    if (!finalCodigoRastreio) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Código de rastreio não encontrado para esse cliente. Verifique se o pedido possui codigo_rastreio.",
+      });
+    }
+
+    if (!finalConversationId) {
+      const existingConversation = await db
+        .collection("whatsapp_conversas")
+        .where("phone", "==", normalizedTo)
+        .limit(1)
+        .get();
+
+      if (!existingConversation.empty) {
+        finalConversationId = existingConversation.docs[0].id;
+      }
+    }
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to: normalizedTo,
+      type: "template",
+      template: {
+        name: "cod_rastreio",
+        language: { code: "pt_BR" },
+        components: [
+          {
+            type: "body",
+            parameters: [
+              {
+                type: "text",
+                text: finalNome,
+              },
+              {
+                type: "text",
+                text: finalCodigoRastreio,
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    const response = await axios.post(
+      `${GRAPH_URL}/${PHONE_NUMBER_ID}/messages`,
+      payload,
+      { headers: graphHeaders() }
+    );
+
+    const waMessageId = response.data?.messages?.[0]?.id || "";
+
+    const textPreview =
+      `Tenho uma ótima noticia, ${finalNome}.\n\n` +
+      `Seu pedido foi despachado com sucesso!\n` +
+      `Você pode acompanhar o envio: https://www.loggi.com/rastreador/${finalCodigoRastreio}\n\n` +
+      `Qualquer dúvida estou á disposição!`;
+
+    if (finalConversationId) {
+      await db.collection("whatsapp_conversas").doc(finalConversationId).set(
+        {
+          clientId: clientId || "",
+          name: finalNome || normalizedTo,
+          phone: normalizedTo,
+          codigo_rastreio: finalCodigoRastreio,
+          lastMessage: "Template: código de rastreio",
+          lastTime: nowISO(),
+          updatedAt: nowISO(),
+        },
+        { merge: true }
+      );
+
+      await saveMessage({
+        conversationId: finalConversationId,
+        direction: "out",
+        to: normalizedTo,
+        clientId: clientId || "",
+        type: "template",
+        templateName: "cod_rastreio",
+        text: textPreview,
+        status: "sent",
+        waMessageId,
+        waResponse: response.data,
+      });
+    } else {
+      await db.collection("whatsapp_template_pendentes").doc(waMessageId).set({
+        waMessageId,
+        to: normalizedTo,
+        clientId: clientId || "",
+        nome: finalNome,
+        codigo_rastreio: finalCodigoRastreio,
+        textPreview,
+        templateName: "cod_rastreio",
+        status: "accepted",
+        createdAt: nowISO(),
+        updatedAt: nowISO(),
+        waResponse: response.data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      conversationId: finalConversationId,
+      pending: !finalConversationId,
+      data: response.data,
+    });
+  } catch (error) {
+    console.error("Erro cod_rastreio:", error.response?.data || error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
 // ENVIAR ÁUDIO / VOICE NOTE
 router.post("/send-audio", upload.single("audio"), async (req, res) => {
   try {
@@ -686,44 +904,44 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
       size: req.file.size,
     });
 
-    let audioBuffer = await convertAudioToOgg(req.file.buffer, originalName);
-let uploadFileName = `voice-${Date.now()}.ogg`;
-let uploadMimeType = "audio/ogg";
+    const audioBuffer = await convertAudioToOgg(req.file.buffer, originalName);
+    const uploadFileName = `voice-${Date.now()}.ogg`;
+    const uploadMimeType = "audio/ogg";
 
     const form = new FormData();
 
     form.append("messaging_product", "whatsapp");
     form.append("type", uploadMimeType);
     form.append("file", audioBuffer, {
-  filename: uploadFileName,
-  contentType: uploadMimeType,
-  knownLength: audioBuffer.length,
-});
+      filename: uploadFileName,
+      contentType: uploadMimeType,
+      knownLength: audioBuffer.length,
+    });
 
-   const mediaResponse = await axios.post(
-  `${GRAPH_URL}/${PHONE_NUMBER_ID}/media`,
-  form,
-  {
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      ...form.getHeaders(),
-    },
-    maxBodyLength: Infinity,
-    maxContentLength: Infinity,
-  }
-);
+    const mediaResponse = await axios.post(
+      `${GRAPH_URL}/${PHONE_NUMBER_ID}/media`,
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+          ...form.getHeaders(),
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      }
+    );
 
     const mediaId = mediaResponse.data.id;
 
     const payload = {
-  messaging_product: "whatsapp",
-  to: normalizedTo,
-  type: "audio",
-  audio: {
-    id: mediaId,
-    voice: true,
-  },
-};
+      messaging_product: "whatsapp",
+      to: normalizedTo,
+      type: "audio",
+      audio: {
+        id: mediaId,
+        voice: true,
+      },
+    };
 
     const sendResponse = await axios.post(
       `${GRAPH_URL}/${PHONE_NUMBER_ID}/messages`,
@@ -804,20 +1022,20 @@ router.get("/conversations/:conversationId/messages", async (req, res) => {
     const { conversationId } = req.params;
 
     const snapshot = await db
-  .collection("whatsapp_mensagens")
-  .where("conversationId", "==", conversationId)
-  .get();
+      .collection("whatsapp_mensagens")
+      .where("conversationId", "==", conversationId)
+      .get();
 
     const messages = snapshot.docs
-  .map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  }))
-  .sort((a, b) => {
-    const dateA = new Date(a.createdAt || 0).getTime();
-    const dateB = new Date(b.createdAt || 0).getTime();
-    return dateA - dateB;
-  });
+      .map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }))
+      .sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0).getTime();
+        const dateB = new Date(b.createdAt || 0).getTime();
+        return dateA - dateB;
+      });
 
     return res.json({ success: true, data: messages });
   } catch (error) {
@@ -1051,8 +1269,6 @@ router.get("/media/:mediaId", async (req, res) => {
 });
 
 // ENVIAR IMAGEM
-// ENVIAR IMAGEM
-// ENVIAR IMAGEM
 router.post("/send-image", upload.single("image"), async (req, res) => {
   try {
     const { to, clientId, conversationId, caption } = req.body;
@@ -1173,8 +1389,6 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
   }
 });
 
-// ENVIAR DOCUMENTO
-// ENVIAR DOCUMENTO
 // ENVIAR DOCUMENTO
 router.post("/send-document", upload.single("document"), async (req, res) => {
   try {
