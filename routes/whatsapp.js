@@ -705,32 +705,35 @@ router.post("/send-template/cod-rastreio", async (req, res) => {
     }
 
     let finalConversationId = conversationId || "";
-    let finalNome = nome || "";
-    let finalCodigoRastreio = codigo_rastreio || "";
+let finalNome = nome || "";
+let finalCodigoRastreio = "";
 
-    if (clientId) {
-      const clienteRef = db.collection("clientes").doc(String(clientId));
-      const clienteSnap = await clienteRef.get();
+if (clientId) {
+  const clienteRef = db.collection("clientes").doc(String(clientId));
+  const clienteSnap = await clienteRef.get();
 
-      if (clienteSnap.exists) {
-        const cliente = clienteSnap.data();
+  if (clienteSnap.exists) {
+    const cliente = clienteSnap.data();
 
-        finalNome =
-          finalNome ||
-          cliente.nome ||
-          cliente.name ||
-          cliente.cliente ||
-          "";
+    finalNome =
+      cliente.nome ||
+      cliente.name ||
+      cliente.cliente ||
+      finalNome ||
+      "";
 
-        finalCodigoRastreio =
-          finalCodigoRastreio ||
-          cliente.codigo_rastreio ||
-          cliente.cod_rastreio ||
-          cliente.rastreio ||
-          cliente.codigoRastreio ||
-          "";
-      }
-    }
+    finalCodigoRastreio =
+      cliente.codigo_rastreio ||
+      cliente.cod_rastreio ||
+      cliente.rastreio ||
+      cliente.codigoRastreio ||
+      "";
+  }
+}
+
+if (!finalCodigoRastreio) {
+  finalCodigoRastreio = codigo_rastreio || "";
+}
 
     if (!finalNome) {
       finalNome = normalizedTo;
