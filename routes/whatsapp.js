@@ -97,6 +97,52 @@ function normalizeWaPhone(phone = "") {
   return `55${onlyNumbers}`;
 }
 
+function getBrazilPhoneVariants(phone = "") {
+  const normalized = normalizeWaPhone(phone);
+
+  if (!normalized) return [];
+
+  const variants = new Set();
+
+  variants.add(normalized);
+
+  if (normalized.startsWith("55")) {
+    const country = "55";
+    const ddd = normalized.slice(2, 4);
+    const number = normalized.slice(4);
+
+    if (ddd.length === 2 && number.length === 9 && number.startsWith("9")) {
+      variants.add(`${country}${ddd}${number.slice(1)}`);
+    }
+
+    if (ddd.length === 2 && number.length === 8) {
+      variants.add(`${country}${ddd}9${number}`);
+    }
+  }
+
+  return Array.from(variants);
+}
+
+async function findConversationByPhone(phone = "") {
+  const variants = getBrazilPhoneVariants(phone);
+
+  if (!variants.length) {
+    return null;
+  }
+
+  const snapshot = await db
+    .collection("whatsapp_conversas")
+    .where("phone", "in", variants.slice(0, 10))
+    .limit(1)
+    .get();
+
+  if (snapshot.empty) {
+    return null;
+  }
+
+  return snapshot.docs[0];
+}
+
 async function saveMessage(data) {
   await db.collection("whatsapp_mensagens").add({
     ...data,
@@ -253,24 +299,22 @@ router.post("/webhook", async (req, res) => {
             }
           }
 
-          const existingConversation = await db
-            .collection("whatsapp_conversas")
-            .where("phone", "==", from)
-            .limit(1)
-            .get();
+          const existingConversationDoc = await findConversationByPhone(from);
 
           let conversationId = "";
 
-          if (!existingConversation.empty) {
-            conversationId = existingConversation.docs[0].id;
+          if (existingConversationDoc) {
+            conversationId = existingConversationDoc.id;
 
             await db.collection("whatsapp_conversas").doc(conversationId).set(
               {
                 name: contactName,
-                phone: from,
+                phone: existingConversationDoc.data().phone || from,
+                whatsappPhone: from,
+                phoneVariants: getBrazilPhoneVariants(from),
                 lastMessage: text,
                 lastTime: nowISO(),
-                unread: (existingConversation.docs[0].data().unread || 0) + 1,
+                unread: (existingConversationDoc.data().unread || 0) + 1,
                 updatedAt: nowISO(),
               },
               { merge: true }
@@ -282,6 +326,8 @@ router.post("/webhook", async (req, res) => {
                 clientId: "",
                 name: contactName,
                 phone: from,
+                whatsappPhone: from,
+                phoneVariants: getBrazilPhoneVariants(from),
                 pipelineStatus: "aguardando_envio",
                 lastMessage: text,
                 lastTime: nowISO(),
@@ -357,16 +403,14 @@ router.post("/webhook", async (req, res) => {
             }
 
             if (["sent", "delivered", "read"].includes(status.status)) {
-              const existingConversation = await db
-                .collection("whatsapp_conversas")
-                .where("phone", "==", pending.to)
-                .limit(1)
-                .get();
+              const existingConversationDoc = await findConversationByPhone(
+                pending.to
+              );
 
               let conversationId = "";
 
-              if (!existingConversation.empty) {
-                conversationId = existingConversation.docs[0].id;
+              if (existingConversationDoc) {
+                conversationId = existingConversationDoc.id;
               } else {
                 const newConversationRef = await db
                   .collection("whatsapp_conversas")
@@ -374,6 +418,8 @@ router.post("/webhook", async (req, res) => {
                     clientId: pending.clientId || "",
                     name: pending.nome || pending.to,
                     phone: pending.to,
+                    whatsappPhone: pending.to,
+                    phoneVariants: getBrazilPhoneVariants(pending.to),
                     product: pending.qtd || "",
                     amount: "",
                     address:
@@ -409,7 +455,10 @@ router.post("/webhook", async (req, res) => {
               });
 
               if (pending.clientId) {
-                const clienteRef = db.collection("clientes").doc(pending.clientId);
+                const clienteRef = db
+                  .collection("clientes")
+                  .doc(pending.clientId);
+
                 const clienteSnap = await clienteRef.get();
 
                 if (clienteSnap.exists) {
@@ -431,6 +480,7 @@ router.post("/webhook", async (req, res) => {
               await db.collection("whatsapp_conversas").doc(conversationId).set(
                 {
                   codigo_rastreio: pending.codigo_rastreio || "",
+                  phoneVariants: getBrazilPhoneVariants(pending.to),
                   lastMessage:
                     pending.templateName === "cod_rastreio"
                       ? "Template: código de rastreio"
@@ -471,14 +521,12 @@ router.post("/send-text", async (req, res) => {
     let finalConversationId = conversationId || "";
 
     if (!finalConversationId) {
-      const existingConversation = await db
-        .collection("whatsapp_conversas")
-        .where("phone", "==", normalizedTo)
-        .limit(1)
-        .get();
+      const existingConversationDoc = await findConversationByPhone(
+        normalizedTo
+      );
 
-      if (!existingConversation.empty) {
-        finalConversationId = existingConversation.docs[0].id;
+      if (existingConversationDoc) {
+        finalConversationId = existingConversationDoc.id;
       }
     }
 
@@ -512,6 +560,8 @@ router.post("/send-text", async (req, res) => {
       {
         clientId: clientId || "",
         phone: normalizedTo,
+        whatsappPhone: normalizedTo,
+        phoneVariants: getBrazilPhoneVariants(normalizedTo),
         lastMessage: message,
         lastTime: nowISO(),
         updatedAt: nowISO(),
@@ -564,24 +614,32 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
 
     const normalizedTo = normalizeWaPhone(to);
 
-    if (!normalizedTo || !nome || !nome_rep || !emprs || !qtd || !rua || !cidade || !n) {
+    if (
+      !normalizedTo ||
+      !nome ||
+      !nome_rep ||
+      !emprs ||
+      !qtd ||
+      !rua ||
+      !cidade ||
+      !n
+    ) {
       return res.status(400).json({
         success: false,
-        error: "Campos obrigatórios: to, nome, nome_rep, emprs, qtd, rua, cidade, n",
+        error:
+          "Campos obrigatórios: to, nome, nome_rep, emprs, qtd, rua, cidade, n",
       });
     }
 
     let finalConversationId = conversationId || "";
 
     if (!finalConversationId) {
-      const existingConversation = await db
-        .collection("whatsapp_conversas")
-        .where("phone", "==", normalizedTo)
-        .limit(1)
-        .get();
+      const existingConversationDoc = await findConversationByPhone(
+        normalizedTo
+      );
 
-      if (!existingConversation.empty) {
-        finalConversationId = existingConversation.docs[0].id;
+      if (existingConversationDoc) {
+        finalConversationId = existingConversationDoc.id;
       }
     }
 
@@ -632,6 +690,8 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
           clientId: clientId || "",
           name: nome || normalizedTo,
           phone: normalizedTo,
+          whatsappPhone: normalizedTo,
+          phoneVariants: getBrazilPhoneVariants(normalizedTo),
           product: qtd || "",
           address: `${rua}, ${cidade}, n° ${n}`,
           lastMessage: "Template: confirmar endereço",
@@ -681,7 +741,10 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
       data: response.data,
     });
   } catch (error) {
-    console.error("Erro confirmar_pedido:", error.response?.data || error.message);
+    console.error(
+      "Erro confirmar_pedido:",
+      error.response?.data || error.message
+    );
 
     return res.status(500).json({
       success: false,
@@ -705,35 +768,31 @@ router.post("/send-template/cod-rastreio", async (req, res) => {
     }
 
     let finalConversationId = conversationId || "";
-let finalNome = nome || "";
-let finalCodigoRastreio = "";
+    let finalNome = nome || "";
+    let finalCodigoRastreio = "";
 
-if (clientId) {
-  const clienteRef = db.collection("clientes").doc(String(clientId));
-  const clienteSnap = await clienteRef.get();
+    if (clientId) {
+      const clienteRef = db.collection("clientes").doc(String(clientId));
+      const clienteSnap = await clienteRef.get();
 
-  if (clienteSnap.exists) {
-    const cliente = clienteSnap.data();
+      if (clienteSnap.exists) {
+        const cliente = clienteSnap.data();
 
-    finalNome =
-      cliente.nome ||
-      cliente.name ||
-      cliente.cliente ||
-      finalNome ||
-      "";
+        finalNome =
+          cliente.nome || cliente.name || cliente.cliente || finalNome || "";
 
-    finalCodigoRastreio =
-      cliente.codigo_rastreio ||
-      cliente.cod_rastreio ||
-      cliente.rastreio ||
-      cliente.codigoRastreio ||
-      "";
-  }
-}
+        finalCodigoRastreio =
+          cliente.codigo_rastreio ||
+          cliente.cod_rastreio ||
+          cliente.rastreio ||
+          cliente.codigoRastreio ||
+          "";
+      }
+    }
 
-if (!finalCodigoRastreio) {
-  finalCodigoRastreio = codigo_rastreio || "";
-}
+    if (!finalCodigoRastreio) {
+      finalCodigoRastreio = codigo_rastreio || "";
+    }
 
     if (!finalNome) {
       finalNome = normalizedTo;
@@ -748,14 +807,12 @@ if (!finalCodigoRastreio) {
     }
 
     if (!finalConversationId) {
-      const existingConversation = await db
-        .collection("whatsapp_conversas")
-        .where("phone", "==", normalizedTo)
-        .limit(1)
-        .get();
+      const existingConversationDoc = await findConversationByPhone(
+        normalizedTo
+      );
 
-      if (!existingConversation.empty) {
-        finalConversationId = existingConversation.docs[0].id;
+      if (existingConversationDoc) {
+        finalConversationId = existingConversationDoc.id;
       }
     }
 
@@ -804,6 +861,8 @@ if (!finalCodigoRastreio) {
           clientId: clientId || "",
           name: finalNome || normalizedTo,
           phone: normalizedTo,
+          whatsappPhone: normalizedTo,
+          phoneVariants: getBrazilPhoneVariants(normalizedTo),
           codigo_rastreio: finalCodigoRastreio,
           lastMessage: "Template: código de rastreio",
           lastTime: nowISO(),
@@ -879,14 +938,12 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
     let finalConversationId = conversationId || "";
 
     if (!finalConversationId) {
-      const existingConversation = await db
-        .collection("whatsapp_conversas")
-        .where("phone", "==", normalizedTo)
-        .limit(1)
-        .get();
+      const existingConversationDoc = await findConversationByPhone(
+        normalizedTo
+      );
 
-      if (!existingConversation.empty) {
-        finalConversationId = existingConversation.docs[0].id;
+      if (existingConversationDoc) {
+        finalConversationId = existingConversationDoc.id;
       }
     }
 
@@ -958,6 +1015,8 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
       {
         clientId: clientId || "",
         phone: normalizedTo,
+        whatsappPhone: normalizedTo,
+        phoneVariants: getBrazilPhoneVariants(normalizedTo),
         lastMessage: "🎤 Áudio",
         lastTime: nowISO(),
         updatedAt: nowISO(),
@@ -1007,10 +1066,55 @@ router.get("/conversations", async (req, res) => {
       .orderBy("updatedAt", "desc")
       .get();
 
-    const conversations = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const conversations = await Promise.all(
+      snapshot.docs.map(async (doc) => {
+        const conversa = {
+          id: doc.id,
+          ...doc.data(),
+        };
+
+        if (!conversa.clientId) {
+          return conversa;
+        }
+
+        try {
+          const clienteDoc = await db
+            .collection("clientes")
+            .doc(String(conversa.clientId))
+            .get();
+
+          if (!clienteDoc.exists) {
+            return conversa;
+          }
+
+          const cliente = clienteDoc.data() || {};
+
+          return {
+            ...conversa,
+            name: conversa.name || cliente.nome || cliente.name || "",
+            phone: conversa.phone || cliente.phone || "",
+            product: conversa.product || cliente.produto || cliente.product || "",
+            amount: conversa.amount || cliente.valor_total || "",
+            address: conversa.address || cliente.endereco || "",
+            codigo_rastreio:
+              conversa.codigo_rastreio ||
+              cliente.codigo_rastreio ||
+              cliente.cod_rastreio ||
+              cliente.rastreio ||
+              cliente.codigoRastreio ||
+              "",
+          };
+        } catch (clienteError) {
+          console.error("Erro ao buscar cliente da conversa:", {
+            conversationId: doc.id,
+            clientId: conversa.clientId,
+            error: clienteError.message,
+          });
+
+          return conversa;
+        }
+      })
+    );
 
     return res.json({ success: true, data: conversations });
   } catch (error) {
@@ -1067,28 +1171,25 @@ router.post("/conversations/open", async (req, res) => {
       });
     }
 
-    const existing = await db
-      .collection("whatsapp_conversas")
-      .where("phone", "==", phone)
-      .limit(1)
-      .get();
+    const normalizedPhone = normalizeWaPhone(phone);
+    const existingDoc = await findConversationByPhone(normalizedPhone);
 
-    if (!existing.empty) {
-      const doc = existing.docs[0];
-
+    if (existingDoc) {
       return res.json({
         success: true,
         data: {
-          id: doc.id,
-          ...doc.data(),
+          id: existingDoc.id,
+          ...existingDoc.data(),
         },
       });
     }
 
     const payload = {
       clientId: clientId || "",
-      name: name || phone,
-      phone,
+      name: name || normalizedPhone,
+      phone: normalizedPhone,
+      whatsappPhone: normalizedPhone,
+      phoneVariants: getBrazilPhoneVariants(normalizedPhone),
       product: product || "",
       amount: amount || "",
       address: address || "",
@@ -1138,7 +1239,8 @@ router.get("/shortcuts", async (req, res) => {
 // CRIAR ATALHO DE MENSAGEM
 router.post("/shortcuts", async (req, res) => {
   try {
-    const { title, type = "text", message, audioUrl, category = "geral" } = req.body;
+    const { title, type = "text", message, audioUrl, category = "geral" } =
+      req.body;
 
     if (!title) {
       return res.status(400).json({
@@ -1241,7 +1343,8 @@ router.get("/media/:mediaId", async (req, res) => {
     });
 
     const mediaUrl = mediaInfoResponse.data?.url;
-    const mimeType = mediaInfoResponse.data?.mime_type || "application/octet-stream";
+    const mimeType =
+      mediaInfoResponse.data?.mime_type || "application/octet-stream";
 
     if (!mediaUrl) {
       return res.status(404).json({
@@ -1294,14 +1397,12 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
     let finalConversationId = conversationId || "";
 
     if (!finalConversationId) {
-      const existingConversation = await db
-        .collection("whatsapp_conversas")
-        .where("phone", "==", normalizedTo)
-        .limit(1)
-        .get();
+      const existingConversationDoc = await findConversationByPhone(
+        normalizedTo
+      );
 
-      if (!existingConversation.empty) {
-        finalConversationId = existingConversation.docs[0].id;
+      if (existingConversationDoc) {
+        finalConversationId = existingConversationDoc.id;
       }
     }
 
@@ -1354,6 +1455,8 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
       {
         clientId: clientId || "",
         phone: normalizedTo,
+        whatsappPhone: normalizedTo,
+        phoneVariants: getBrazilPhoneVariants(normalizedTo),
         lastMessage: caption || "🖼️ Imagem",
         lastTime: nowISO(),
         updatedAt: nowISO(),
@@ -1415,14 +1518,12 @@ router.post("/send-document", upload.single("document"), async (req, res) => {
     let finalConversationId = conversationId || "";
 
     if (!finalConversationId) {
-      const existingConversation = await db
-        .collection("whatsapp_conversas")
-        .where("phone", "==", normalizedTo)
-        .limit(1)
-        .get();
+      const existingConversationDoc = await findConversationByPhone(
+        normalizedTo
+      );
 
-      if (!existingConversation.empty) {
-        finalConversationId = existingConversation.docs[0].id;
+      if (existingConversationDoc) {
+        finalConversationId = existingConversationDoc.id;
       }
     }
 
@@ -1476,6 +1577,8 @@ router.post("/send-document", upload.single("document"), async (req, res) => {
       {
         clientId: clientId || "",
         phone: normalizedTo,
+        whatsappPhone: normalizedTo,
+        phoneVariants: getBrazilPhoneVariants(normalizedTo),
         lastMessage: `📄 ${req.file.originalname || "Documento"}`,
         lastTime: nowISO(),
         updatedAt: nowISO(),
@@ -1528,6 +1631,7 @@ router.get("/conversations/find", async (req, res) => {
     }
 
     let snapshot = null;
+    let foundDoc = null;
 
     if (clientId) {
       snapshot = await db
@@ -1537,15 +1641,15 @@ router.get("/conversations/find", async (req, res) => {
         .get();
     }
 
-    if ((!snapshot || snapshot.empty) && normalizedPhone) {
-      snapshot = await db
-        .collection("whatsapp_conversas")
-        .where("phone", "==", normalizedPhone)
-        .limit(1)
-        .get();
+    if (snapshot && !snapshot.empty) {
+      foundDoc = snapshot.docs[0];
     }
 
-    if (!snapshot || snapshot.empty) {
+    if (!foundDoc && normalizedPhone) {
+      foundDoc = await findConversationByPhone(normalizedPhone);
+    }
+
+    if (!foundDoc) {
       return res.json({
         success: true,
         exists: false,
@@ -1553,14 +1657,12 @@ router.get("/conversations/find", async (req, res) => {
       });
     }
 
-    const doc = snapshot.docs[0];
-
     return res.json({
       success: true,
       exists: true,
       data: {
-        id: doc.id,
-        ...doc.data(),
+        id: foundDoc.id,
+        ...foundDoc.data(),
       },
     });
   } catch (error) {
