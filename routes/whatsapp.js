@@ -576,7 +576,7 @@ router.post("/send-text", async (req, res) => {
       clientId: clientId || "",
       type: "text",
       text: message,
-      status: "sent",
+      status: "accepted",
       waMessageId,
       waResponse: response.data,
     });
@@ -709,7 +709,7 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
         type: "template",
         templateName: "confirmar_pedido",
         text: textPreview,
-        status: "sent",
+        status: "accepted",
         waMessageId,
         waResponse: response.data,
       });
@@ -816,6 +816,32 @@ router.post("/send-template/cod-rastreio", async (req, res) => {
       }
     }
 
+    if (finalConversationId) {
+  const recentTemplateSnapshot = await db
+    .collection("whatsapp_mensagens")
+    .where("conversationId", "==", finalConversationId)
+    .where("templateName", "==", "cod_rastreio")
+    .orderBy("createdAt", "desc")
+    .limit(1)
+    .get();
+
+  if (!recentTemplateSnapshot.empty) {
+    const lastTemplate = recentTemplateSnapshot.docs[0].data();
+    const lastCreatedAt = new Date(lastTemplate.createdAt || 0).getTime();
+    const now = Date.now();
+
+    const diffSeconds = (now - lastCreatedAt) / 1000;
+
+    if (diffSeconds < 30) {
+      return res.status(409).json({
+        success: false,
+        error:
+          "Esse template de rastreio já foi enviado há poucos segundos. Aguarde antes de enviar novamente.",
+      });
+    }
+  }
+}
+
     const payload = {
       messaging_product: "whatsapp",
       to: normalizedTo,
@@ -879,7 +905,7 @@ router.post("/send-template/cod-rastreio", async (req, res) => {
         type: "template",
         templateName: "cod_rastreio",
         text: textPreview,
-        status: "sent",
+        status: "accepted",
         waMessageId,
         waResponse: response.data,
       });
@@ -1033,7 +1059,7 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
       text: "🎤 Áudio",
       mediaId,
       mimeType: uploadMimeType,
-      status: "sent",
+      status: "accepted",
       waMessageId: sendResponse.data?.messages?.[0]?.id || "",
       waResponse: sendResponse.data,
     });
@@ -1474,7 +1500,7 @@ router.post("/send-image", upload.single("image"), async (req, res) => {
       mediaId,
       mimeType: req.file.mimetype || "image/jpeg",
       fileName: req.file.originalname || "",
-      status: "sent",
+      status: "accepted",
       waMessageId: sendResponse.data?.messages?.[0]?.id || "",
       waResponse: sendResponse.data,
     });
@@ -1596,7 +1622,7 @@ router.post("/send-document", upload.single("document"), async (req, res) => {
       mediaId,
       mimeType: req.file.mimetype || "application/pdf",
       fileName: req.file.originalname || "",
-      status: "sent",
+      status: "accepted",
       waMessageId: sendResponse.data?.messages?.[0]?.id || "",
       waResponse: sendResponse.data,
     });
