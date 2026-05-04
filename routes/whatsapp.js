@@ -1358,6 +1358,32 @@ router.put("/conversations/:conversationId/read", async (req, res) => {
   }
 });
 
+// MARCAR CONVERSA COMO NÃO LIDA
+router.put("/conversations/:conversationId/unread", async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+
+    await db.collection("whatsapp_conversas").doc(conversationId).set(
+      {
+        unread: 1,
+        unreadMarkedManually: true,
+        unreadMarkedAt: nowISO(),
+        updatedAt: nowISO(),
+      },
+      { merge: true }
+    );
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Erro ao marcar conversa como não lida:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // PROXY PARA BAIXAR/EXIBIR MÍDIA DO WHATSAPP
 router.get("/media/:mediaId", async (req, res) => {
   try {
