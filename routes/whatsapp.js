@@ -193,101 +193,138 @@ router.post("/webhook", async (req, res) => {
           const from = normalizeWaPhone(msg.from);
           const contactName = contact?.profile?.name || from;
 
-          let text = "";
-          let mediaId = "";
-          let mediaUrl = "";
-          let mimeType = "";
-          let fileName = "";
+         let text = "";
+let mediaId = "";
+let mediaUrl = "";
+let mimeType = "";
+let fileName = "";
+let messageType = msg.type || "unknown";
 
-          if (msg.type === "text") {
-            text = msg.text?.body || "";
-          }
+let reactionToWaMessageId = "";
+let reactionTargetText = "";
+let reactionTargetType = "";
+let reactionTargetFromMe = false;
 
-          if (msg.type === "button") {
-            text = msg.button?.text || msg.button?.payload || "Botão clicado";
-          }
+if (messageType === "text") {
+  /**
+   * Mensagem normal de texto.
+   * Emoji comum também chega aqui, exemplo:
+   * "👍", "😂", "❤️", "Bom dia 😄"
+   */
+  text = msg.text?.body || "";
+}
 
-          if (msg.type === "interactive") {
-            text =
-              msg.interactive?.button_reply?.title ||
-              msg.interactive?.list_reply?.title ||
-              "Resposta interativa";
-          }
+if (messageType === "button") {
+  text = msg.button?.text || msg.button?.payload || "Botão clicado";
+}
 
-          if (msg.type === "reaction") {
-            const emoji = msg.reaction?.emoji || "";
-            const reactedMessageId = msg.reaction?.message_id || "";
+if (messageType === "interactive") {
+  text =
+    msg.interactive?.button_reply?.title ||
+    msg.interactive?.button_reply?.id ||
+    msg.interactive?.list_reply?.title ||
+    msg.interactive?.list_reply?.id ||
+    "Resposta interativa";
+}
 
-            text = emoji ? `Reagiu com ${emoji}` : "Removeu uma reação";
-            fileName = reactedMessageId;
-          }
+if (messageType === "reaction") {
+  const emoji = msg.reaction?.emoji || "";
+  const reactedMessageId = msg.reaction?.message_id || "";
 
-          if (msg.type === "sticker") {
-            mediaId = msg.sticker?.id || "";
-            mimeType = msg.sticker?.mime_type || "";
-            text = "Figurinha recebida";
-          }
+  reactionToWaMessageId = reactedMessageId;
 
-          if (msg.type === "audio") {
-            mediaId = msg.audio?.id || "";
-            mimeType = msg.audio?.mime_type || "";
-            text = "🎤 Áudio recebido";
-          }
+  text = emoji ? `Reagiu com ${emoji}` : "Removeu uma reação";
+}
 
-          if (msg.type === "image") {
-            mediaId = msg.image?.id || "";
-            mimeType = msg.image?.mime_type || "";
-            text = msg.image?.caption || "🖼️ Imagem recebida";
-          }
+if (messageType === "sticker") {
+  mediaId = msg.sticker?.id || "";
+  mimeType = msg.sticker?.mime_type || "";
+  text = "Figurinha recebida";
+}
 
-          if (msg.type === "document") {
-            mediaId = msg.document?.id || "";
-            mimeType = msg.document?.mime_type || "";
-            fileName = msg.document?.filename || "";
-            text =
-              msg.document?.caption ||
-              `📄 Documento recebido${fileName ? `: ${fileName}` : ""}`;
-          }
+if (messageType === "audio") {
+  mediaId = msg.audio?.id || "";
+  mimeType = msg.audio?.mime_type || "";
+  text = "🎤 Áudio recebido";
+}
 
-          if (msg.type === "video") {
-            mediaId = msg.video?.id || "";
-            mimeType = msg.video?.mime_type || "";
-            text = msg.video?.caption || "🎥 Vídeo recebido";
-          }
+if (messageType === "image") {
+  mediaId = msg.image?.id || "";
+  mimeType = msg.image?.mime_type || "";
+  text = msg.image?.caption || "🖼️ Imagem recebida";
+}
 
-          if (msg.type === "location") {
-            const latitude = msg.location?.latitude;
-            const longitude = msg.location?.longitude;
-            const name = msg.location?.name || "";
-            const address = msg.location?.address || "";
+if (messageType === "document") {
+  mediaId = msg.document?.id || "";
+  mimeType = msg.document?.mime_type || "";
+  fileName = msg.document?.filename || "";
+  text =
+    msg.document?.caption ||
+    `📄 Documento recebido${fileName ? `: ${fileName}` : ""}`;
+}
 
-            text = `📍 Localização recebida${name ? `: ${name}` : ""}${
-              address ? ` - ${address}` : ""
-            }`;
+if (messageType === "video") {
+  mediaId = msg.video?.id || "";
+  mimeType = msg.video?.mime_type || "";
+  text = msg.video?.caption || "🎥 Vídeo recebido";
+}
 
-            fileName = latitude && longitude ? `${latitude},${longitude}` : "";
-          }
+if (messageType === "location") {
+  const latitude = msg.location?.latitude;
+  const longitude = msg.location?.longitude;
+  const name = msg.location?.name || "";
+  const address = msg.location?.address || "";
 
-          if (msg.type === "contacts") {
-            const receivedContacts = msg.contacts || [];
-            const firstContact = receivedContacts[0];
+  text = `📍 Localização recebida${name ? `: ${name}` : ""}${
+    address ? ` - ${address}` : ""
+  }`;
 
-            const contactReceivedName =
-              firstContact?.name?.formatted_name ||
-              firstContact?.name?.first_name ||
-              "Contato";
+  fileName =
+    latitude && longitude
+      ? `${latitude},${longitude}`
+      : "";
+}
 
-            text = `👤 Contato recebido: ${contactReceivedName}`;
-          }
+if (messageType === "contacts") {
+  const receivedContacts = msg.contacts || [];
+  const firstContact = receivedContacts[0];
 
-          if (msg.type === "unsupported") {
-            text = "Mensagem não suportada pelo WhatsApp Business API";
-          }
+  const contactReceivedName =
+    firstContact?.name?.formatted_name ||
+    firstContact?.name?.first_name ||
+    firstContact?.name?.last_name ||
+    "Contato";
 
-          if (!text) {
-            text = `[${msg.type || "mensagem"}]`;
-          }
+  const firstPhone =
+    firstContact?.phones?.[0]?.phone ||
+    firstContact?.phones?.[0]?.wa_id ||
+    "";
 
+  text = `👤 Contato recebido: ${contactReceivedName}${
+    firstPhone ? ` - ${firstPhone}` : ""
+  }`;
+}
+
+if (messageType === "order") {
+  text = "🛒 Pedido recebido pelo WhatsApp";
+}
+
+if (messageType === "system") {
+  text = msg.system?.body || "Mensagem de sistema recebida";
+}
+
+if (messageType === "unsupported") {
+  text = "Mensagem não suportada pelo WhatsApp Business API";
+}
+
+/**
+ * Segurança extra:
+ * se vier algum tipo novo da Meta que ainda não tratamos,
+ * não deixa a conversa aparecer vazia.
+ */
+if (!text) {
+  text = `[${messageType || "mensagem"} recebida]`;
+}
           if (mediaId) {
             try {
               mediaUrl = await getWhatsappMediaUrl(mediaId);
@@ -306,13 +343,42 @@ router.post("/webhook", async (req, res) => {
           if (existingConversationDoc) {
             conversationId = existingConversationDoc.id;
 
+            if (messageType === "reaction" && reactionToWaMessageId) {
+  try {
+    const reactedMessageSnapshot = await db
+      .collection("whatsapp_mensagens")
+      .where("conversationId", "==", conversationId)
+      .where("waMessageId", "==", reactionToWaMessageId)
+      .limit(1)
+      .get();
+
+    if (!reactedMessageSnapshot.empty) {
+      const reactedMessage = reactedMessageSnapshot.docs[0].data();
+
+      reactionTargetText =
+        reactedMessage.text ||
+        reactedMessage.fileName ||
+        reactedMessage.templateName ||
+        reactedMessage.type ||
+        "Mensagem";
+
+      reactionTargetType = reactedMessage.type || "";
+      reactionTargetFromMe = reactedMessage.direction === "out";
+    }
+  } catch (error) {
+    console.error("Erro ao buscar mensagem da reação:", error.message);
+  }
+}
+
             await db.collection("whatsapp_conversas").doc(conversationId).set(
               {
                 name: contactName,
                 phone: existingConversationDoc.data().phone || from,
                 whatsappPhone: from,
                 phoneVariants: getBrazilPhoneVariants(from),
-                lastMessage: text,
+                lastMessage: reactionTargetText
+  ? `${text}: ${reactionTargetText.slice(0, 40)}`
+  : text,
                 lastTime: nowISO(),
                 unread: (existingConversationDoc.data().unread || 0) + 1,
                 updatedAt: nowISO(),
@@ -329,7 +395,9 @@ router.post("/webhook", async (req, res) => {
                 whatsappPhone: from,
                 phoneVariants: getBrazilPhoneVariants(from),
                 pipelineStatus: "aguardando_envio",
-                lastMessage: text,
+                lastMessage: reactionTargetText
+  ? `${text}: ${reactionTargetText.slice(0, 40)}`
+  : text,
                 lastTime: nowISO(),
                 unread: 1,
                 createdAt: nowISO(),
@@ -340,19 +408,25 @@ router.post("/webhook", async (req, res) => {
           }
 
           await saveMessage({
-            conversationId,
-            direction: "in",
-            waMessageId: msg.id,
-            from,
-            contactName,
-            type: msg.type || "unknown",
-            text,
-            mediaId,
-            mediaUrl,
-            mimeType,
-            fileName,
-            raw: msg,
-          });
+  conversationId,
+  direction: "in",
+  waMessageId: msg.id,
+  from,
+  contactName,
+  type: messageType,
+  text,
+  mediaId,
+  mediaUrl,
+  mimeType,
+  fileName,
+
+  reactionToWaMessageId,
+  reactionTargetText,
+  reactionTargetType,
+  reactionTargetFromMe,
+
+  raw: msg,
+});
         }
 
         for (const status of statuses) {
