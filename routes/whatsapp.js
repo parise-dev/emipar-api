@@ -123,7 +123,9 @@ function getBrazilPhoneVariants(phone = "") {
   return Array.from(variants);
 }
 
-async function findConversationByPhone(phone = "") {
+async function findConversationByPhone(phone = "", options = {}) {
+  const { includeDeleted = false } = options;
+
   const variants = getBrazilPhoneVariants(phone);
 
   if (!variants.length) {
@@ -133,14 +135,37 @@ async function findConversationByPhone(phone = "") {
   const snapshot = await db
     .collection("whatsapp_conversas")
     .where("phone", "in", variants.slice(0, 10))
-    .limit(1)
+    .limit(10)
     .get();
 
   if (snapshot.empty) {
     return null;
   }
 
-  return snapshot.docs[0];
+  const activeConversations = snapshot.docs
+    .filter((doc) => {
+      if (includeDeleted) return true;
+
+      const data = doc.data();
+
+      return !data.deleted && !data.deletedAt;
+    })
+    .sort((a, b) => {
+      const dataA = a.data();
+      const dataB = b.data();
+
+      const dateA = new Date(
+        dataA.lastTime || dataA.updatedAt || dataA.createdAt || 0,
+      ).getTime();
+
+      const dateB = new Date(
+        dataB.lastTime || dataB.updatedAt || dataB.createdAt || 0,
+      ).getTime();
+
+      return dateB - dateA;
+    });
+
+  return activeConversations[0] || null;
 }
 
 async function saveMessage(data) {
@@ -1417,61 +1442,73 @@ router.post("/send-audio", upload.single("audio"), async (req, res) => {
 });
 
 // LISTAR CONVERSAS
+// LISTAR CONVERSAS
 router.get("/conversations", async (req, res) => {
   try {
+    const includeDeleted = req.query.includeDeleted === "true";
+
     const snapshot = await db
       .collection("whatsapp_conversas")
       .orderBy("updatedAt", "desc")
       .get();
 
     const conversations = await Promise.all(
-      snapshot.docs.map(async (doc) => {
-        const conversa = {
-          id: doc.id,
-          ...doc.data(),
-        };
+      snapshot.docs
+        .map((doc) => {
+          const conversa = {
+            id: doc.id,
+            ...doc.data(),
+          };
 
-        if (!conversa.clientId) {
           return conversa;
-        }
+        })
+        .filter((conversa) => {
+          if (includeDeleted) return true;
 
-        try {
-          const clienteDoc = await db
-            .collection("clientes")
-            .doc(String(conversa.clientId))
-            .get();
-
-          if (!clienteDoc.exists) {
+          return !conversa.deleted && !conversa.deletedAt;
+        })
+        .map(async (conversa) => {
+          if (!conversa.clientId) {
             return conversa;
           }
 
-          const cliente = clienteDoc.data() || {};
+          try {
+            const clienteDoc = await db
+              .collection("clientes")
+              .doc(String(conversa.clientId))
+              .get();
 
-          return {
-            ...conversa,
-            name: conversa.name || cliente.nome || cliente.name || "",
-            phone: conversa.phone || cliente.phone || "",
-            product: conversa.product || cliente.produto || cliente.product || "",
-            amount: conversa.amount || cliente.valor_total || "",
-            address: conversa.address || cliente.endereco || "",
-            codigo_rastreio:
-              conversa.codigo_rastreio ||
-              cliente.codigo_rastreio ||
-              cliente.cod_rastreio ||
-              cliente.rastreio ||
-              cliente.codigoRastreio ||
-              "",
-          };
-        } catch (clienteError) {
-          console.error("Erro ao buscar cliente da conversa:", {
-            conversationId: doc.id,
-            clientId: conversa.clientId,
-            error: clienteError.message,
-          });
+            if (!clienteDoc.exists) {
+              return conversa;
+            }
 
-          return conversa;
-        }
-      })
+            const cliente = clienteDoc.data() || {};
+
+            return {
+              ...conversa,
+              name: conversa.name || cliente.nome || cliente.name || "",
+              phone: conversa.phone || cliente.phone || "",
+              product: conversa.product || cliente.produto || cliente.product || "",
+              amount: conversa.amount || cliente.valor_total || "",
+              address: conversa.address || cliente.endereco || "",
+              codigo_rastreio:
+                conversa.codigo_rastreio ||
+                cliente.codigo_rastreio ||
+                cliente.cod_rastreio ||
+                cliente.rastreio ||
+                cliente.codigoRastreio ||
+                "",
+            };
+          } catch (clienteError) {
+            console.error("Erro ao buscar cliente da conversa:", {
+              conversationId: conversa.id,
+              clientId: conversa.clientId,
+              error: clienteError.message,
+            });
+
+            return conversa;
+          }
+        }),
     );
 
     return res.json({ success: true, data: conversations });
