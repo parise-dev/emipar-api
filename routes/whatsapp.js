@@ -503,9 +503,12 @@ if (!text) {
                     codigo_rastreio: pending.codigo_rastreio || "",
                     pipelineStatus: "aguardando_envio",
                     lastMessage:
-                      pending.templateName === "cod_rastreio"
-                        ? "Template: código de rastreio"
-                        : "Template: confirmar endereço",
+  pending.lastMessage ||
+  (pending.templateName === "cod_rastreio"
+    ? "Template: código de rastreio"
+    : pending.templateName === "confirmar_pedido"
+      ? "Template: confirmar endereço"
+      : `Template: ${pending.templateName || "mensagem"}`),
                     lastTime: nowISO(),
                     unread: 0,
                     createdAt: nowISO(),
@@ -556,9 +559,12 @@ if (!text) {
                   codigo_rastreio: pending.codigo_rastreio || "",
                   phoneVariants: getBrazilPhoneVariants(pending.to),
                   lastMessage:
-                    pending.templateName === "cod_rastreio"
-                      ? "Template: código de rastreio"
-                      : "Template: confirmar endereço",
+  pending.lastMessage ||
+  (pending.templateName === "cod_rastreio"
+    ? "Template: código de rastreio"
+    : pending.templateName === "confirmar_pedido"
+      ? "Template: confirmar endereço"
+      : `Template: ${pending.templateName || "mensagem"}`),
                   lastTime: nowISO(),
                   updatedAt: nowISO(),
                 },
@@ -817,6 +823,250 @@ router.post("/send-template/confirmar-pedido", async (req, res) => {
   } catch (error) {
     console.error(
       "Erro confirmar_pedido:",
+      error.response?.data || error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
+const GENERIC_APPROVED_TEMPLATES = {
+  um_message: {
+    expectedVariables: 6,
+    lastMessage: "Template: confirmando endereço 2",
+  },
+  confirm_endereco: {
+    expectedVariables: 0,
+    lastMessage: "Template: confirma endereço",
+  },
+  chamar_cliente: {
+    expectedVariables: 1,
+    lastMessage: "Template: chamar cliente",
+  },
+  falar_urg: {
+    expectedVariables: 1,
+    lastMessage: "Template: urgência",
+  },
+  cobranca_1_1: {
+    expectedVariables: 1,
+    lastMessage: "Template: cobrança 1",
+  },
+  cobranca_2: {
+    expectedVariables: 0,
+    lastMessage: "Template: cobrança sim ou não",
+  },
+  cobranca_3: {
+    expectedVariables: 0,
+    lastMessage: "Template: cobrança 3",
+  },
+  cobranca_pendente: {
+    expectedVariables: 1,
+    lastMessage: "Template: pagamento amanhã",
+  },
+  cob_pendente_2: {
+    expectedVariables: 0,
+    lastMessage: "Template: aviso financeiro",
+  },
+  cob_pendente_3: {
+    expectedVariables: 1,
+    lastMessage: "Template: confirmado amanhã",
+  },
+};
+
+// ENVIAR TEMPLATE GENÉRICO APROVADO
+router.post("/send-template/generic", async (req, res) => {
+  try {
+    const {
+      to,
+      clientId,
+      conversationId,
+      templateName,
+      variables = [],
+      textPreview = "",
+    } = req.body;
+
+    const normalizedTo = normalizeWaPhone(to);
+
+    if (!normalizedTo) {
+      return res.status(400).json({
+        success: false,
+        error: "Campo obrigatório: to",
+      });
+    }
+
+    if (!templateName) {
+      return res.status(400).json({
+        success: false,
+        error: "Campo obrigatório: templateName",
+      });
+    }
+
+    const templateConfig = GENERIC_APPROVED_TEMPLATES[templateName];
+
+    if (!templateConfig) {
+      return res.status(400).json({
+        success: false,
+        error: `Template não permitido nesta rota: ${templateName}`,
+      });
+    }
+
+    const safeVariables = Array.isArray(variables)
+      ? variables.map((item) => String(item || "").trim())
+      : [];
+
+    if (safeVariables.length !== templateConfig.expectedVariables) {
+      return res.status(400).json({
+        success: false,
+        error: `O template ${templateName} espera ${templateConfig.expectedVariables} variável(is), mas recebeu ${safeVariables.length}.`,
+      });
+    }
+
+    const emptyVariableIndex = safeVariables.findIndex((item) => !item);
+
+    if (emptyVariableIndex >= 0) {
+      return res.status(400).json({
+        success: false,
+        error: `A variável ${emptyVariableIndex + 1} do template ${templateName} está vazia.`,
+      });
+    }
+
+    let finalConversationId = conversationId || "";
+
+    if (!finalConversationId) {
+      const existingConversationDoc = await findConversationByPhone(
+        normalizedTo
+      );
+
+      if (existingConversationDoc) {
+        finalConversationId = existingConversationDoc.id;
+      }
+    }
+
+    if (finalConversationId) {
+      const recentTemplateSnapshot = await db
+        .collection("whatsapp_mensagens")
+        .where("conversationId", "==", finalConversationId)
+        .where("templateName", "==", templateName)
+        .limit(10)
+        .get();
+
+      if (!recentTemplateSnapshot.empty) {
+        const templates = recentTemplateSnapshot.docs
+          .map((doc) => doc.data())
+          .sort((a, b) => {
+            const dateA = new Date(a.createdAt || 0).getTime();
+            const dateB = new Date(b.createdAt || 0).getTime();
+
+            return dateB - dateA;
+          });
+
+        const lastTemplate = templates[0];
+        const lastCreatedAt = new Date(lastTemplate.createdAt || 0).getTime();
+        const now = Date.now();
+
+        const diffSeconds = (now - lastCreatedAt) / 1000;
+
+        if (diffSeconds < 30) {
+          return res.status(409).json({
+            success: false,
+            error:
+              "Esse template já foi enviado há poucos segundos. Aguarde antes de enviar novamente.",
+          });
+        }
+      }
+    }
+
+    const templatePayload = {
+      name: templateName,
+      language: { code: "pt_BR" },
+    };
+
+    if (safeVariables.length > 0) {
+      templatePayload.components = [
+        {
+          type: "body",
+          parameters: safeVariables.map((value) => ({
+            type: "text",
+            text: value,
+          })),
+        },
+      ];
+    }
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to: normalizedTo,
+      type: "template",
+      template: templatePayload,
+    };
+
+    const response = await axios.post(
+      `${GRAPH_URL}/${PHONE_NUMBER_ID}/messages`,
+      payload,
+      { headers: graphHeaders() }
+    );
+
+    const waMessageId = response.data?.messages?.[0]?.id || "";
+
+    const finalTextPreview =
+      textPreview ||
+      `${templateConfig.lastMessage || "Template enviado"} (${templateName})`;
+
+    if (finalConversationId) {
+      await db.collection("whatsapp_conversas").doc(finalConversationId).set(
+        {
+          clientId: clientId || "",
+          phone: normalizedTo,
+          whatsappPhone: normalizedTo,
+          phoneVariants: getBrazilPhoneVariants(normalizedTo),
+          lastMessage: templateConfig.lastMessage || `Template: ${templateName}`,
+          lastTime: nowISO(),
+          updatedAt: nowISO(),
+        },
+        { merge: true }
+      );
+
+      await saveMessage({
+        conversationId: finalConversationId,
+        direction: "out",
+        to: normalizedTo,
+        clientId: clientId || "",
+        type: "template",
+        templateName,
+        text: finalTextPreview,
+        status: "accepted",
+        waMessageId,
+        waResponse: response.data,
+      });
+    } else {
+      await db.collection("whatsapp_template_pendentes").doc(waMessageId).set({
+        waMessageId,
+        to: normalizedTo,
+        clientId: clientId || "",
+        nome: safeVariables[0] || normalizedTo,
+        templateName,
+        variables: safeVariables,
+        textPreview: finalTextPreview,
+        lastMessage: templateConfig.lastMessage || `Template: ${templateName}`,
+        status: "accepted",
+        createdAt: nowISO(),
+        updatedAt: nowISO(),
+        waResponse: response.data,
+      });
+    }
+
+    return res.json({
+      success: true,
+      conversationId: finalConversationId,
+      pending: !finalConversationId,
+      data: response.data,
+    });
+  } catch (error) {
+    console.error(
+      "Erro send-template/generic:",
       error.response?.data || error.message
     );
 
