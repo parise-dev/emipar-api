@@ -1486,6 +1486,8 @@ router.get("/conversations/:conversationId/messages", async (req, res) => {
   try {
     const { conversationId } = req.params;
 
+    const includeDeleted = req.query.includeDeleted === "true";
+
     const snapshot = await db
       .collection("whatsapp_mensagens")
       .where("conversationId", "==", conversationId)
@@ -1496,6 +1498,11 @@ router.get("/conversations/:conversationId/messages", async (req, res) => {
         id: doc.id,
         ...doc.data(),
       }))
+      .filter((message) => {
+        if (includeDeleted) return true;
+
+        return !message.deleted && !message.deletedAt;
+      })
       .sort((a, b) => {
         const dateA = new Date(a.createdAt || 0).getTime();
         const dateB = new Date(b.createdAt || 0).getTime();
@@ -1571,6 +1578,55 @@ router.post("/conversations/open", async (req, res) => {
   } catch (error) {
     console.error("Erro ao abrir conversa:", error);
     return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.put("/conversations/:conversationId/delete", async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+
+    if (!conversationId) {
+      return res.status(400).json({
+        success: false,
+        message: "ID da conversa é obrigatório.",
+      });
+    }
+
+    const conversationRef = db
+      .collection("whatsapp_conversas")
+      .doc(conversationId);
+
+    const conversationDoc = await conversationRef.get();
+
+    if (!conversationDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        message: "Conversa não encontrada.",
+      });
+    }
+
+    await conversationRef.set(
+      {
+        deleted: true,
+        deletedAt: nowISO(),
+        deletedReason: "deleted_by_attendant",
+        updatedAt: nowISO(),
+      },
+      { merge: true },
+    );
+
+    return res.json({
+      success: true,
+      message: "Conversa removida da visualização.",
+    });
+  } catch (error) {
+    console.error("Erro ao remover conversa:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Erro ao remover conversa.",
+      error: error.message,
+    });
   }
 });
 
@@ -1703,6 +1759,53 @@ router.put("/conversations/:conversationId/unread", async (req, res) => {
 
     return res.status(500).json({
       success: false,
+      error: error.message,
+    });
+  }
+});
+
+// EXCLUIR MENSAGEM APENAS VISUALMENTE / EXCLUSÃO LÓGICA
+router.put("/messages/:messageId/delete", async (req, res) => {
+  try {
+    const { messageId } = req.params;
+
+    if (!messageId) {
+      return res.status(400).json({
+        success: false,
+        message: "ID da mensagem é obrigatório.",
+      });
+    }
+
+    const messageRef = db.collection("whatsapp_mensagens").doc(messageId);
+    const messageDoc = await messageRef.get();
+
+    if (!messageDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        message: "Mensagem não encontrada.",
+      });
+    }
+
+    await messageRef.set(
+      {
+        deleted: true,
+        deletedAt: nowISO(),
+        deletedReason: "deleted_by_attendant",
+        updatedAt: nowISO(),
+      },
+      { merge: true },
+    );
+
+    return res.json({
+      success: true,
+      message: "Mensagem removida da visualização.",
+    });
+  } catch (error) {
+    console.error("Erro ao excluir mensagem:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Erro ao excluir mensagem.",
       error: error.message,
     });
   }
