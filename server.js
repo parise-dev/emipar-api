@@ -1649,20 +1649,49 @@ app.delete("/financeiro/limpar", async (req, res) => {
 
 app.get("/financeiro/filtro", async (req, res) => {
   try {
-    const { tipo, inicio, fim } = req.query;
-    let q = db.collection("financeiro");
-    if (tipo) q = q.where("tipo", "==", tipo);
+    const { tipo, inicio, fim, periodo } = req.query;
 
-    const range = normalizeRangeISO(inicio, fim);
+    let q = db.collection("financeiro");
+
+    if (tipo) {
+      q = q.where("tipo", "==", String(tipo));
+    }
+
+    let range = { inicio: null, fim: null };
+
+    if (periodo) {
+      const dashboardRange = getDashboardRange(
+        String(periodo || "mes"),
+        inicio,
+        fim
+      );
+
+      range = {
+        inicio: dashboardRange.inicio,
+        fim: dashboardRange.fim,
+      };
+    } else {
+      range = normalizeRangeISO(inicio, fim);
+    }
+
+    if (range.inicio) {
+      range.inicio = clampInicioRange(range.inicio);
+    }
+
     if (range.inicio && range.fim) {
       q = q.where("data", ">=", range.inicio).where("data", "<=", range.fim);
     }
 
     const snap = await q.orderBy("data", "desc").get();
-    const registros = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    res.status(200).json(registros);
+
+    const registros = snap.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    return res.status(200).json(registros);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 
