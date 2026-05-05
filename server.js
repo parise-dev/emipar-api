@@ -1928,11 +1928,11 @@ function getDashboardRange(periodo, inicioQuery, fimQuery) {
 }
 
 async function calcularDashboardDoDia(dateObj) {
-  let inicio = customRange?.inicio || startOfDayISO_SP(dateObj);
+   let inicio = customRange?.inicio || startOfDayISO_SP(dateObj);
   const fim = customRange?.fim || endOfDayISO_SP(dateObj);
 
   // ✅ aplica o CORTE do sistema
-  inicio = clampInicioRange(inicio);
+  inicio = clampInicioRange(inicio, customRange = null);
 
   // 1) GERADO HOJE (data_criacao)
   const clientesDoDiaSnap = await db
