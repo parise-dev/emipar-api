@@ -1730,10 +1730,206 @@ async function calcCustoGrupo(grupoId, qtdPedido) {
   return custoKit * safeInt(qtdPedido || 1, 1);
 }
 
+function addDays(dateObj, amount) {
+  const d = new Date(dateObj);
+  d.setDate(d.getDate() + amount);
+  return d;
+}
+
+function startOfMonthISO_SP(dateObj) {
+  const tz = "America/Sao_Paulo";
+  const p = tzParts(tz, dateObj);
+
+  const approx = new Date(
+    Date.UTC(Number(p.year), Number(p.month) - 1, 1, 0, 0, 0, 0)
+  );
+
+  const offMin = tzOffsetMinutes(tz, approx);
+  return new Date(approx.getTime() - offMin * 60000).toISOString();
+}
+
+function endOfMonthISO_SP(dateObj) {
+  const tz = "America/Sao_Paulo";
+  const p = tzParts(tz, dateObj);
+
+  const lastDay = new Date(
+    Number(p.year),
+    Number(p.month),
+    0
+  ).getDate();
+
+  const approx = new Date(
+    Date.UTC(
+      Number(p.year),
+      Number(p.month) - 1,
+      lastDay,
+      23,
+      59,
+      59,
+      999
+    )
+  );
+
+  const offMin = tzOffsetMinutes(tz, approx);
+  return new Date(approx.getTime() - offMin * 60000).toISOString();
+}
+
+function startOfWeekISO_SP(dateObj) {
+  const tz = "America/Sao_Paulo";
+  const p = tzParts(tz, dateObj);
+
+  const localDate = new Date(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day)
+  );
+
+  const day = localDate.getDay(); // domingo 0
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+
+  localDate.setDate(localDate.getDate() + diffToMonday);
+
+  return startOfDayISO_SP(localDate);
+}
+
+function endOfWeekISO_SP(dateObj) {
+  const tz = "America/Sao_Paulo";
+  const p = tzParts(tz, dateObj);
+
+  const localDate = new Date(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day)
+  );
+
+  const day = localDate.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+
+  localDate.setDate(localDate.getDate() + diffToMonday + 6);
+
+  return endOfDayISO_SP(localDate);
+}
+
+function dateOnlyToStartISO_SP(value) {
+  const s = String(value || "").trim();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
+
+  return new Date(`${s}T00:00:00.000-03:00`).toISOString();
+}
+
+function dateOnlyToEndISO_SP(value) {
+  const s = String(value || "").trim();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
+
+  return new Date(`${s}T23:59:59.999-03:00`).toISOString();
+}
+
+function getDashboardRange(periodo, inicioQuery, fimQuery) {
+  const hoje = new Date();
+  const ontem = addDays(hoje, -1);
+
+  if (periodo === "ontem") {
+    return {
+      label: "Ontem",
+      inicio: startOfDayISO_SP(ontem),
+      fim: endOfDayISO_SP(ontem),
+      comparativoInicio: startOfDayISO_SP(addDays(ontem, -1)),
+      comparativoFim: endOfDayISO_SP(addDays(ontem, -1)),
+      comparativoLabel: "Dia anterior",
+    };
+  }
+
+  if (periodo === "semana") {
+    const inicio = startOfWeekISO_SP(hoje);
+    const fim = endOfWeekISO_SP(hoje);
+
+    const semanaAnteriorBase = addDays(new Date(inicio), -1);
+
+    return {
+      label: "Semana",
+      inicio,
+      fim,
+      comparativoInicio: startOfWeekISO_SP(semanaAnteriorBase),
+      comparativoFim: endOfWeekISO_SP(semanaAnteriorBase),
+      comparativoLabel: "Semana anterior",
+    };
+  }
+
+  if (periodo === "mes") {
+    const inicio = startOfMonthISO_SP(hoje);
+    const fim = endOfMonthISO_SP(hoje);
+
+    const mesAnteriorBase = new Date(hoje);
+    mesAnteriorBase.setMonth(mesAnteriorBase.getMonth() - 1);
+
+    return {
+      label: "Mês",
+      inicio,
+      fim,
+      comparativoInicio: startOfMonthISO_SP(mesAnteriorBase),
+      comparativoFim: endOfMonthISO_SP(mesAnteriorBase),
+      comparativoLabel: "Mês anterior",
+    };
+  }
+
+  if (periodo === "mes_passado") {
+    const mesPassadoBase = new Date(hoje);
+    mesPassadoBase.setMonth(mesPassadoBase.getMonth() - 1);
+
+    const doisMesesAtrasBase = new Date(hoje);
+    doisMesesAtrasBase.setMonth(doisMesesAtrasBase.getMonth() - 2);
+
+    return {
+      label: "Mês passado",
+      inicio: startOfMonthISO_SP(mesPassadoBase),
+      fim: endOfMonthISO_SP(mesPassadoBase),
+      comparativoInicio: startOfMonthISO_SP(doisMesesAtrasBase),
+      comparativoFim: endOfMonthISO_SP(doisMesesAtrasBase),
+      comparativoLabel: "Mês anterior",
+    };
+  }
+
+  if (periodo === "personalizado") {
+    const inicio = dateOnlyToStartISO_SP(inicioQuery);
+    const fim = dateOnlyToEndISO_SP(fimQuery);
+
+    if (!inicio || !fim) {
+      throw new Error("Para período personalizado, envie inicio e fim no formato YYYY-MM-DD.");
+    }
+
+    const inicioDate = new Date(inicio);
+    const fimDate = new Date(fim);
+    const diffMs = fimDate.getTime() - inicioDate.getTime();
+    const comparativoFimDate = addDays(inicioDate, -1);
+    const comparativoInicioDate = new Date(
+      comparativoFimDate.getTime() - diffMs
+    );
+
+    return {
+      label: "Personalizado",
+      inicio,
+      fim,
+      comparativoInicio: comparativoInicioDate.toISOString(),
+      comparativoFim: endOfDayISO_SP(comparativoFimDate),
+      comparativoLabel: "Período anterior",
+    };
+  }
+
+  return {
+    label: "Hoje",
+    inicio: startOfDayISO_SP(hoje),
+    fim: endOfDayISO_SP(hoje),
+    comparativoInicio: startOfDayISO_SP(ontem),
+    comparativoFim: endOfDayISO_SP(ontem),
+    comparativoLabel: "Ontem",
+  };
+}
 
 async function calcularDashboardDoDia(dateObj) {
-  let inicio = startOfDayISO_SP(dateObj);
-  const fim = endOfDayISO_SP(dateObj);
+  let inicio = customRange?.inicio || startOfDayISO_SP(dateObj);
+  const fim = customRange?.fim || endOfDayISO_SP(dateObj);
 
   // ✅ aplica o CORTE do sistema
   inicio = clampInicioRange(inicio);
@@ -1906,7 +2102,7 @@ async function calcularDashboardDoDia(dateObj) {
     : 0;
 
   return {
-    data: formatDateKeySP(dateObj),
+    data: customRange?.label || formatDateKeySP(dateObj),
     periodo: { inicio, fim },
 
     geradoHoje,
@@ -1938,39 +2134,70 @@ function invalidateDashboardCache() {
 
 app.get("/dashboard/diario", async (req, res) => {
   try {
+    const { periodo = "hoje", inicio, fim } = req.query;
+
+    const periodoNormalizado = String(periodo || "hoje");
+
+    const isDefaultHoje =
+      periodoNormalizado === "hoje" && !inicio && !fim;
+
     const now = Date.now();
 
-    // cache por 2 minutos
-    if (dashboardCache && now - dashboardCacheAt < 2 * 60 * 1000) {
+    // cache por 2 minutos somente no padrão "hoje"
+    if (
+      isDefaultHoje &&
+      dashboardCache &&
+      now - dashboardCacheAt < 2 * 60 * 1000
+    ) {
       return res.json(dashboardCache);
     }
 
-    const hoje = new Date();
-    const ontem = new Date();
-    ontem.setDate(hoje.getDate() - 1);
+    const range = getDashboardRange(periodoNormalizado, inicio, fim);
 
-    // dashboards por dia (já com regras corretas)
-    const dashHoje = await calcularDashboardDoDia(hoje);
-    const dashOntem = await calcularDashboardDoDia(ontem);
+    const dashPrincipal = await calcularDashboardDoDia(new Date(), {
+      inicio: range.inicio,
+      fim: range.fim,
+      label: range.label,
+    });
+
+    const dashComparativo = await calcularDashboardDoDia(new Date(), {
+      inicio: range.comparativoInicio,
+      fim: range.comparativoFim,
+      label: range.comparativoLabel,
+    });
 
     // ✅ RANKING GERAL (ALL-TIME)
     const rankingGeral = await calcularRankingGeral();
 
     // ✅ mantém o nome "ranking" para não quebrar o front
-    dashHoje.ranking = rankingGeral;
-    dashOntem.ranking = rankingGeral;
+    dashPrincipal.ranking = rankingGeral;
+    dashComparativo.ranking = rankingGeral;
 
-    dashboardCache = {
-      hoje: dashHoje,
-      ontem: dashOntem,
+    const payload = {
+      hoje: dashPrincipal,
+      ontem: dashComparativo,
+      filtro: {
+        periodo: periodoNormalizado,
+        label: range.label,
+        inicio: range.inicio,
+        fim: range.fim,
+        comparativoLabel: range.comparativoLabel,
+        comparativoInicio: range.comparativoInicio,
+        comparativoFim: range.comparativoFim,
+      },
     };
 
-    dashboardCacheAt = now;
+    if (isDefaultHoje) {
+      dashboardCache = payload;
+      dashboardCacheAt = now;
+    }
 
-    res.json(dashboardCache);
+    return res.json(payload);
   } catch (e) {
     console.error("Erro dashboard:", e);
-    res.status(500).json({ error: "Erro ao gerar dashboard" });
+    return res.status(500).json({
+      error: e.message || "Erro ao gerar dashboard",
+    });
   }
 });
 
