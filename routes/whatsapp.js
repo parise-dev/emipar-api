@@ -419,7 +419,7 @@ if (!text) {
                 phone: from,
                 whatsappPhone: from,
                 phoneVariants: getBrazilPhoneVariants(from),
-                pipelineStatus: "aguardando_envio",
+                pipelineStatus: "",
                 lastMessage: reactionTargetText
   ? `${text}: ${reactionTargetText.slice(0, 40)}`
   : text,
@@ -526,8 +526,8 @@ if (!text) {
                         ? `${pending.rua}, ${pending.cidade}, n° ${pending.n}`
                         : "",
                     codigo_rastreio: pending.codigo_rastreio || "",
-                    pipelineStatus: "aguardando_envio",
-                    lastMessage:
+pipelineStatus: pending.pipelineStatus || "",
+lastMessage:
   pending.lastMessage ||
   (pending.templateName === "cod_rastreio"
     ? "Template: código de rastreio"
@@ -579,22 +579,26 @@ if (!text) {
                 }
               }
 
-              await db.collection("whatsapp_conversas").doc(conversationId).set(
-                {
-                  codigo_rastreio: pending.codigo_rastreio || "",
-                  phoneVariants: getBrazilPhoneVariants(pending.to),
-                  lastMessage:
-  pending.lastMessage ||
-  (pending.templateName === "cod_rastreio"
-    ? "Template: código de rastreio"
-    : pending.templateName === "confirmar_pedido"
-      ? "Template: confirmar endereço"
-      : `Template: ${pending.templateName || "mensagem"}`),
-                  lastTime: nowISO(),
-                  updatedAt: nowISO(),
-                },
-                { merge: true }
-              );
+             await db.collection("whatsapp_conversas").doc(conversationId).set(
+  {
+    codigo_rastreio: pending.codigo_rastreio || "",
+    phoneVariants: getBrazilPhoneVariants(pending.to),
+    lastMessage:
+      pending.lastMessage ||
+      (pending.templateName === "cod_rastreio"
+        ? "Template: código de rastreio"
+        : pending.templateName === "confirmar_pedido"
+          ? "Template: confirmar endereço"
+          : `Template: ${pending.templateName || "mensagem"}`),
+    lastTime: nowISO(),
+    updatedAt: nowISO(),
+
+    ...(pending.pipelineStatus
+      ? { pipelineStatus: pending.pipelineStatus }
+      : {}),
+  },
+  { merge: true }
+);
 
               await pendingRef.delete();
             }
@@ -1240,19 +1244,22 @@ router.post("/send-template/cod-rastreio", async (req, res) => {
 
     if (finalConversationId) {
       await db.collection("whatsapp_conversas").doc(finalConversationId).set(
-        {
-          clientId: clientId || "",
-          name: finalNome || normalizedTo,
-          phone: normalizedTo,
-          whatsappPhone: normalizedTo,
-          phoneVariants: getBrazilPhoneVariants(normalizedTo),
-          codigo_rastreio: finalCodigoRastreio,
-          lastMessage: "Template: código de rastreio",
-          lastTime: nowISO(),
-          updatedAt: nowISO(),
-        },
-        { merge: true }
-      );
+  {
+    clientId: clientId || "",
+    name: finalNome || normalizedTo,
+    phone: normalizedTo,
+    whatsappPhone: normalizedTo,
+    phoneVariants: getBrazilPhoneVariants(normalizedTo),
+    codigo_rastreio: finalCodigoRastreio,
+    lastMessage: "Template: código de rastreio",
+    lastTime: nowISO(),
+    updatedAt: nowISO(),
+
+    // Quando envia o código de rastreio, a conversa entra como Enviado
+    pipelineStatus: "enviado",
+  },
+  { merge: true }
+);
 
       await saveMessage({
         conversationId: finalConversationId,
@@ -1557,14 +1564,14 @@ router.get("/conversations/:conversationId/messages", async (req, res) => {
 router.post("/conversations/open", async (req, res) => {
   try {
     const {
-      clientId,
-      name,
-      phone,
-      product,
-      amount,
-      address,
-      pipelineStatus = "aguardando_envio",
-    } = req.body;
+  clientId,
+  name,
+  phone,
+  product,
+  amount,
+  address,
+  pipelineStatus = "",
+} = req.body;
 
     if (!phone) {
       return res.status(400).json({
@@ -1732,17 +1739,32 @@ router.put("/conversations/:conversationId/status", async (req, res) => {
     const { conversationId } = req.params;
     const { pipelineStatus } = req.body;
 
-    if (!pipelineStatus) {
-      return res.status(400).json({
-        success: false,
-        error: "Campo obrigatório: pipelineStatus",
-      });
-    }
+    const allowedPipelineStatuses = [
+  "enviado",
+  "a_pagar",
+  "pago",
+  "calote",
+  "extravio",
+];
 
-    await db.collection("whatsapp_conversas").doc(conversationId).update({
-      pipelineStatus,
-      updatedAt: nowISO(),
-    });
+if (!pipelineStatus) {
+  return res.status(400).json({
+    success: false,
+    error: "Campo obrigatório: pipelineStatus",
+  });
+}
+
+if (!allowedPipelineStatuses.includes(pipelineStatus)) {
+  return res.status(400).json({
+    success: false,
+    error: `pipelineStatus inválido: ${pipelineStatus}`,
+  });
+}
+
+await db.collection("whatsapp_conversas").doc(conversationId).update({
+  pipelineStatus,
+  updatedAt: nowISO(),
+});
 
     return res.json({ success: true });
   } catch (error) {

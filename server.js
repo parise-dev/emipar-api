@@ -1255,6 +1255,20 @@ app.put("/clientes/:id/entrega", async (req, res) => {
   }
 }
 
+let nextWhatsappPipelineStatus = "";
+
+if (statusEnvioFinal === "Enviado") {
+  nextWhatsappPipelineStatus = "enviado";
+}
+
+if (statusEnvioFinal === "Entregue") {
+  nextWhatsappPipelineStatus = "a_pagar";
+}
+
+if (statusEnvioFinal === "Extravio") {
+  nextWhatsappPipelineStatus = "extravio";
+}
+
 
     if (statusEnvioFinal === "Etiqueta Gerada") {
       // força status_pedido = Vendido
@@ -1305,13 +1319,43 @@ app.put("/clientes/:id/entrega", async (req, res) => {
 
     await ref.update({ ...update, ...sync });
 
-    invalidateDashboardCache();
+if (nextWhatsappPipelineStatus) {
+  const whatsappSnapshot = await db
+    .collection("whatsapp_conversas")
+    .where("clientId", "==", String(id))
+    .limit(20)
+    .get();
 
-    return res.status(200).json({
-      message: "Entrega atualizada",
-      update,
-      sync,
+  if (!whatsappSnapshot.empty) {
+    const batch = db.batch();
+
+    whatsappSnapshot.docs.forEach((doc) => {
+      const conversa = doc.data();
+
+      if (conversa.deleted || conversa.deletedAt) return;
+
+      batch.set(
+        doc.ref,
+        {
+          pipelineStatus: nextWhatsappPipelineStatus,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
     });
+
+    await batch.commit();
+  }
+}
+
+invalidateDashboardCache();
+
+return res.status(200).json({
+  message: "Entrega atualizada",
+  update,
+  sync,
+  whatsappPipelineStatus: nextWhatsappPipelineStatus,
+});
   } catch (e) {
     return res.status(400).json({ error: e.message });
   }
