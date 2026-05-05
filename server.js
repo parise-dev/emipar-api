@@ -927,7 +927,12 @@ calote_motivo: checkCliente.caloteMotivo || "",
 
 app.get("/clientes", async (req, res) => {
   try {
-    const { periodo, inicio, fim } = req.query;
+    const { periodo, inicio, fim, campoData } = req.query;
+
+    const allowedDateFields = ["data_criacao", "data_envio", "data_pagamento"];
+    const dateField = allowedDateFields.includes(String(campoData || ""))
+      ? String(campoData)
+      : "data_criacao";
 
     let query = db.collection("clientes");
 
@@ -939,11 +944,11 @@ app.get("/clientes", async (req, res) => {
       );
 
       query = query
-        .where("data_criacao", ">=", range.inicio)
-        .where("data_criacao", "<=", range.fim);
+        .where(dateField, ">=", range.inicio)
+        .where(dateField, "<=", range.fim);
     }
 
-    const snap = await query.orderBy("data_criacao", "desc").get();
+    const snap = await query.orderBy(dateField, "desc").get();
 
     const clientes = snap.docs.map((doc) => ({
       id: doc.id,
