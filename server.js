@@ -925,16 +925,34 @@ calote_motivo: checkCliente.caloteMotivo || "",
 });
 
 
-app.get("/clientes", async (_, res) => {
+app.get("/clientes", async (req, res) => {
   try {
-    const snap = await db
-      .collection("clientes")
-      .orderBy("data_criacao", "desc")
-      .get();
-    const clientes = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    res.status(200).json(clientes);
+    const { periodo, inicio, fim } = req.query;
+
+    let query = db.collection("clientes");
+
+    if (periodo) {
+      const range = getDashboardRange(
+        String(periodo || "hoje"),
+        inicio,
+        fim
+      );
+
+      query = query
+        .where("data_criacao", ">=", range.inicio)
+        .where("data_criacao", "<=", range.fim);
+    }
+
+    const snap = await query.orderBy("data_criacao", "desc").get();
+
+    const clientes = snap.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    return res.status(200).json(clientes);
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    return res.status(400).json({ error: e.message });
   }
 });
 
